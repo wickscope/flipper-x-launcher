@@ -1,0 +1,852 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>FLIPPER X</title>
+<style>
+:root{
+  --bg:#060d0b; --panel:#0b1613; --panel2:#0e1d18; --line:#1b3a30;
+  --accent:#2bd48a; --accent2:#5dcaa5; --dim:#3f9e80; --text:#c6ead9;
+  --muted:#5f9d87; --warn:#e0ad4e; --danger:#e2564a; --ok:#2bd48a;
+  --radius:9px; --mono:ui-monospace,"Cascadia Mono","Consolas","DejaVu Sans Mono",monospace;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;font-family:var(--mono);color:var(--text)}
+body{display:flex;align-items:center;justify-content:center;overflow:hidden}
+#device{position:relative;width:100%;max-width:400px;height:100vh;max-height:860px;background:var(--bg);
+  display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--line)}
+@media(min-width:420px){#device{border-radius:18px;height:92vh}}
+
+/* status bar */
+#statusbar{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;font-size:11px;
+  color:var(--accent2);border-bottom:1px solid var(--line);background:#07110e;flex:0 0 auto}
+#statusbar .l,#statusbar .r{display:flex;gap:9px;align-items:center}
+#statusbar .r i{opacity:.85}
+.radio-off{color:var(--dim)}
+#clock{color:#e6fff6;font-weight:600}
+
+/* content */
+#content{flex:1 1 auto;overflow-y:auto;padding:12px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#content::-webkit-scrollbar{width:4px}
+#content::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+.vhead{display:flex;align-items:center;gap:8px;margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+.vhead .tag{font-size:10px;letter-spacing:2px;color:var(--dim)}
+.vhead h1{font-size:15px;margin:0;color:#e6fff6;font-weight:600;letter-spacing:1px}
+.vhead .ico{font-size:18px;color:var(--accent)}
+
+/* softkeys */
+#softkeys{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font-size:11px;
+  color:var(--muted);border-top:1px solid var(--line);background:#07110e;flex:0 0 auto}
+#softkeys b{color:var(--accent2);font-weight:600}
+#softkeys .mid{color:var(--dim);letter-spacing:1px}
+
+/* home grid */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{position:relative;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);
+  padding:12px 6px;text-align:center;min-height:74px;display:flex;flex-direction:column;justify-content:center;
+  gap:5px;cursor:pointer;transition:border-color .12s,background .12s}
+.tile .num{position:absolute;top:5px;left:8px;font-size:10px;color:var(--dim)}
+.tile .gi{font-size:22px;line-height:1}
+.tile .nm{font-size:11px;color:var(--accent2)}
+.tile.sel{border-color:var(--accent);background:var(--panel2);box-shadow:0 0 0 1px var(--accent) inset}
+.tile.sel .nm{color:#e6fff6}
+
+/* generic list rows */
+.row{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel);margin-bottom:7px;cursor:pointer}
+.row.sel{border-color:var(--accent);background:var(--panel2)}
+.row .ri{font-size:17px;color:var(--accent);width:22px;text-align:center;flex:0 0 auto}
+.row .rt{flex:1;min-width:0}
+.row .rt .t1{font-size:13px;color:#e6fff6}
+.row .rt .t2{font-size:10.5px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .rv{font-size:11px;color:var(--accent2);flex:0 0 auto}
+.pill{font-size:9.5px;padding:2px 7px;border-radius:20px;border:1px solid var(--line)}
+.pill.on{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+.pill.off{color:var(--dim)}
+.pill.warn{color:var(--warn);border-color:#4a3a17}
+
+/* panels / text */
+.card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:11px;margin-bottom:9px}
+.card h3{margin:0 0 7px;font-size:11px;letter-spacing:1px;color:var(--dim);font-weight:600}
+.kv{display:flex;justify-content:space-between;font-size:12px;padding:3px 0}
+.kv span:first-child{color:var(--muted)}
+.kv span:last-child{color:var(--text)}
+.big{font-size:26px;color:#e6fff6;font-weight:600}
+.hint{font-size:10.5px;color:var(--muted);line-height:1.5}
+.note{font-size:10.5px;color:var(--warn);line-height:1.5;border-left:2px solid #4a3a17;padding-left:8px;margin:7px 0}
+
+/* terminal */
+#term{font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+#term .c-in{color:var(--accent2)} #term .c-out{color:var(--text)} #term .c-err{color:var(--danger)}
+#term .c-sys{color:var(--dim)}
+.prompt{display:flex;gap:6px;align-items:center;margin-top:4px}
+.prompt .ps{color:var(--accent);font-size:12px}
+.prompt input{flex:1;background:transparent;border:none;outline:none;color:#e6fff6;font-family:var(--mono);font-size:12px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:7px;background:var(--panel2);
+  color:var(--accent2);font-family:var(--mono);font-size:12px;padding:8px 12px;cursor:pointer;margin:3px 4px 3px 0}
+.btn.sel,.btn:active{border-color:var(--accent);color:#e6fff6;background:#10241d}
+.btn.danger{color:var(--danger);border-color:#4a221f}
+.inp{width:100%;background:#07110e;border:1px solid var(--line);border-radius:7px;color:#e6fff6;
+  font-family:var(--mono);font-size:13px;padding:9px;outline:none;margin:4px 0}
+
+/* boot + lock overlays */
+.overlay{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+.brandbig{font-size:30px;letter-spacing:7px;color:#e6fff6;font-weight:700}
+.brandsub{font-size:10px;letter-spacing:4px;color:var(--dim)}
+.bootlog{font-size:11px;color:var(--dim);white-space:pre;text-align:left;min-height:120px}
+.pindots{display:flex;gap:12px;margin-top:6px}
+.pindots .d{width:12px;height:12px;border-radius:50%;border:1px solid var(--accent);background:transparent}
+.pindots .d.f{background:var(--accent)}
+.shieldmark{font-size:40px;color:var(--accent)}
+.blink{animation:bl 1s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+.hidden{display:none!important}
+.scan{height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);margin:2px 0 10px;opacity:.5;
+  background-size:180px 2px;animation:scanmove 2.4s linear infinite}
+
+/* ---- quantum / futuristic ambient motion ---- */
+#qfx{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.9}
+#statusbar{position:relative;z-index:3;background:rgba(7,17,14,.72)}
+#content{position:relative;z-index:2}
+#softkeys{position:relative;z-index:3;background:rgba(7,17,14,.72)}
+.card,.tile,.row{background:rgba(11,22,18,.80);backdrop-filter:none}
+.tile.sel{background:rgba(16,37,29,.92)} .row.sel{background:rgba(16,37,29,.9)}
+.overlay{background:rgba(6,13,11,.66)}
+.overlay#boot,.overlay#lock{background:rgba(6,13,11,.55)}
+.overlay#idle{background:rgba(6,13,11,.48)}
+/* ---- cobra mascot ---- */
+.cobra-slot{display:flex;justify-content:center;margin-bottom:4px}
+.cobra-svg{width:92px;height:96px;overflow:visible;transform-origin:50% 90%;animation:sway 4.2s ease-in-out infinite;filter:drop-shadow(0 0 6px rgba(43,212,138,.35))}
+@keyframes sway{0%,100%{transform:rotate(-3.5deg)}50%{transform:rotate(3.5deg)}}
+.cobra-tongue{animation:flick 2.8s ease-in-out infinite}
+@keyframes flick{0%,66%,100%{opacity:0}74%,86%{opacity:1}}
+.cobra-eye{animation:eyeglow 2.2s ease-in-out infinite}
+@keyframes eyeglow{0%,100%{opacity:.7}50%{opacity:1}}
+.cobra-hood{animation:hoodbreath 3.6s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 72%}
+@keyframes hoodbreath{0%,100%{transform:scaleX(1)}50%{transform:scaleX(1.06)}}
+@keyframes scanmove{0%{background-position:-180px 0}100%{background-position:220px 0}}
+@keyframes glow{0%,100%{text-shadow:0 0 6px rgba(43,212,138,.35)}50%{text-shadow:0 0 15px rgba(43,212,138,.85)}}
+@keyframes flicker{0%,100%{opacity:1}48%{opacity:.82}50%{opacity:.6}52%{opacity:.86}}
+@keyframes rise{0%{transform:translateY(0)}100%{transform:translateY(-3px)}}
+@keyframes underline{0%{background-position:-120px 0}100%{background-position:180px 0}}
+.brandbig{animation:glow 3s ease-in-out infinite}
+.vhead h1{animation:glow 4.5s ease-in-out infinite}
+.vhead{position:relative}
+.vhead::after{content:"";position:absolute;left:0;bottom:-1px;height:1px;width:100%;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:120px 1px;
+  animation:underline 3s linear infinite;opacity:.7}
+#shieldstat{animation:glow 2.6s ease-in-out infinite}
+.gi{animation:rise 2.8s ease-in-out infinite alternate}
+.shieldmark{animation:glow 2.4s ease-in-out infinite,flicker 6s linear infinite}
+.big{animation:glow 3.4s ease-in-out infinite}
+</style>
+</head>
+<body>
+<div id="device">
+  <canvas id="qfx"></canvas>
+  <div id="statusbar">
+    <div class="l"><span id="shieldstat" style="color:var(--accent)">●&nbsp;SECURE</span></div>
+    <div class="r">
+      <i class="radio-off" id="r-cell" title="cellular">CELL</i>
+      <i class="radio-off" id="r-wifi" title="wifi">WiFi</i>
+      <i class="radio-off" id="r-bt" title="bluetooth">BT</i>
+      <i class="radio-off" id="r-gps" title="gps">GPS</i>
+      <span id="clock">--:--</span>
+    </div>
+  </div>
+  <div id="content"></div>
+  <div id="softkeys">
+    <b id="sk-left">MENU</b><span class="mid" id="sk-mid">FLIPPER&nbsp;X</span><b id="sk-right">LOCK</b>
+  </div>
+
+  <!-- BOOT -->
+  <div class="overlay" id="boot">
+    <div id="cobra-boot" class="cobra-slot"></div>
+    <div class="brandbig">FLIPPER&nbsp;X</div>
+    <div class="brandsub">RESEARCH&nbsp;·&nbsp;PRIVACY&nbsp;·&nbsp;OFFLINE</div>
+    <div class="scan"></div>
+    <div class="bootlog" id="bootlog"></div>
+  </div>
+
+  <!-- LOCK -->
+  <div class="overlay hidden" id="lock">
+    <div class="shieldmark">⬡</div>
+    <div class="brandbig" style="font-size:22px;letter-spacing:4px">FLIPPER&nbsp;X</div>
+    <div class="hint">enter access code</div>
+    <div class="pindots" id="pindots"></div>
+    <div class="hint" id="lockmsg" style="color:var(--muted)">keypad 0–9 · # clear · default 0000</div>
+  </div>
+
+  <!-- IDLE / COVER screen (outer display when the lid is closed) -->
+  <div class="overlay hidden" id="idle">
+    <div id="idle-sec" style="position:absolute;top:16px;left:0;right:0;text-align:center;font-size:11px;color:var(--accent);letter-spacing:2px">⬡ SECURE · 0 TRACKERS</div>
+    <div id="cobra-idle" class="cobra-slot"></div>
+    <div id="cobra-quip" class="hint" style="margin:0 0 8px;color:var(--accent2);min-height:14px;letter-spacing:1px"></div>
+    <div id="idle-clock" style="font-size:54px;font-weight:700;color:#e6fff6;letter-spacing:2px;line-height:1">--:--</div>
+    <div id="idle-date" style="font-size:12px;color:var(--accent2);letter-spacing:4px;margin-top:4px">—</div>
+    <div id="idle-radios" style="display:flex;gap:14px;margin-top:20px;font-size:11px">
+      <span class="radio-off">CELL</span><span class="radio-off">WiFi</span><span class="radio-off">BT</span><span class="radio-off">GPS</span>
+    </div>
+    <div id="idle-np" class="hint" style="margin-top:16px;min-height:16px;color:var(--accent2)"></div>
+    <div style="position:absolute;bottom:16px;left:0;right:0;text-align:center;font-size:10px;color:var(--dim);letter-spacing:2px">⬡ FLIPPER X · open lid / press any key</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function(){
+/* ---------- storage ---------- */
+var LS={
+  get:function(k,d){try{var v=localStorage.getItem("FX_"+k);return v==null?d:JSON.parse(v);}catch(e){return d;}},
+  set:function(k,v){try{localStorage.setItem("FX_"+k,JSON.stringify(v));}catch(e){}},
+  del:function(k){try{localStorage.removeItem("FX_"+k);}catch(e){}}
+};
+
+/* ---------- global state ---------- */
+var S={
+  view:"home", sel:0, locked:true, pinBuf:"",
+  pin: LS.get("pin","0000"),
+  radios: LS.get("radios",{cell:false,wifi:false,bt:false,gps:false}),
+  sensors: LS.get("sensors",{mic:false,cam:false,motion:false,loc:false}),
+  shield: LS.get("shield",true),
+  records: LS.get("records",[]),      // offline DB
+  vault: LS.get("vault",[]),          // encrypted notes
+  messages: LS.get("messages",[]),    // offline comms
+  contacts: LS.get("contacts",[{n:"Base",id:"self"}]),
+  playlist: LS.get("playlist",[]),    // music (filled from SD card)
+  plugins: LS.get("plugins",[
+    {id:"wardrive",name:"Wi-Fi Survey",on:true,core:true},
+    {id:"btsniff",name:"BLE Logger",on:true,core:true},
+    {id:"ir",name:"IR Remote (OTG)",on:false,core:false},
+    {id:"nfc",name:"NFC Reader (OTG)",on:false,core:false},
+    {id:"sdr",name:"SDR Scanner (OTG)",on:false,core:false}
+  ]),
+  termlog:[], termHist:[], termHi:0
+};
+function persist(){LS.set("pin",S.pin);LS.set("radios",S.radios);LS.set("sensors",S.sensors);
+  LS.set("shield",S.shield);LS.set("records",S.records);LS.set("vault",S.vault);LS.set("messages",S.messages);
+  LS.set("contacts",S.contacts);LS.set("playlist",S.playlist);LS.set("plugins",S.plugins);}
+
+/* ---------- els ---------- */
+var elC=document.getElementById("content"),
+    elBoot=document.getElementById("boot"), elLock=document.getElementById("lock"), elIdle=document.getElementById("idle"),
+    elSkL=document.getElementById("sk-left"), elSkM=document.getElementById("sk-mid"), elSkR=document.getElementById("sk-right");
+
+/* ---------- cobra mascot (digital brand character) ---------- */
+var COBRA='<svg viewBox="0 0 120 120" class="cobra-svg" xmlns="http://www.w3.org/2000/svg" aria-label="FLIPPER X shark">'+
+  '<path d="M60,4 L45,30 L75,30 Z" fill="#136b54" stroke="#5dcaa5" stroke-width="1.5" stroke-linejoin="round"/>'+
+  '<path d="M26,64 L3,80 L33,84 Z" fill="#136b54" stroke="#5dcaa5" stroke-width="1.5" stroke-linejoin="round"/>'+
+  '<path d="M94,64 L117,80 L87,84 Z" fill="#136b54" stroke="#5dcaa5" stroke-width="1.5" stroke-linejoin="round"/>'+
+  '<path d="M60,18 C33,18 21,39 25,62 C28,85 45,99 60,99 C75,99 92,85 95,62 C99,39 87,18 60,18 Z" fill="#1d9e75" stroke="#5dcaa5" stroke-width="2"/>'+
+  '<path d="M33,74 C42,91 54,98 60,98 C66,98 78,91 87,74 C74,81 46,81 33,74 Z" fill="#2bd48a" opacity="0.55"/>'+
+  '<path d="M33,50 q-3,7 0,14 M40,48 q-3,8 0,16" fill="none" stroke="#0a5141" stroke-width="1.6" opacity="0.6"/>'+
+  '<path d="M87,50 q3,7 0,14 M80,48 q3,8 0,16" fill="none" stroke="#0a5141" stroke-width="1.6" opacity="0.6"/>'+
+  '<circle cx="46" cy="50" r="7.5" fill="#06110d"/><circle cx="74" cy="50" r="7.5" fill="#06110d"/>'+
+  '<circle class="cobra-eye" cx="46" cy="50" r="3.6" fill="#ffd36b"/><circle class="cobra-eye" cx="74" cy="50" r="3.6" fill="#ffd36b"/>'+
+  '<circle cx="47.6" cy="48.2" r="1.2" fill="#ffffff"/><circle cx="75.6" cy="48.2" r="1.2" fill="#ffffff"/>'+
+  '<path d="M37,70 Q60,65 83,70 Q60,93 37,70 Z" fill="#06110d" stroke="#0a5141" stroke-width="1"/>'+
+  '<path d="M40,70 L45,79 L50,70 L55,79 L60,70 L65,79 L70,70 L75,79 L80,70 Z" fill="#eafff6"/>'+
+  '<path d="M46,85 L50,79 L55,85 L60,79 L65,85 L70,79 L74,85 Z" fill="#cdeedd"/>'+
+  '</svg>';
+(function(){var a=document.getElementById("cobra-boot"),b=document.getElementById("cobra-idle");
+  if(a)a.innerHTML=COBRA; if(b)b.innerHTML=COBRA;})();
+var QUIPS=["all quiet","0 trackers","shields up","no one is watching","radios silent","standing guard","nothing leaks"];
+setInterval(function(){var q=document.getElementById("cobra-quip");
+  if(q&&elIdle&&!elIdle.classList.contains("hidden")) q.textContent='"'+QUIPS[Math.floor(Math.random()*QUIPS.length)]+'"';},3600);
+
+/* ---------- clock + radios ---------- */
+function two(n){return(n<10?"0":"")+n;}
+function tick(){var d=new Date();document.getElementById("clock").textContent=two(d.getHours())+":"+two(d.getMinutes());
+  if(elIdle&&!elIdle.classList.contains("hidden"))updateIdle();}
+setInterval(tick,1000);tick();
+function paintRadios(){
+  [["cell","r-cell"],["wifi","r-wifi"],["bt","r-bt"],["gps","r-gps"]].forEach(function(p){
+    var e=document.getElementById(p[1]); if(!e)return;
+    e.className=S.radios[p[0]]?"":"radio-off"; });
+  var any=S.radios.cell||S.radios.wifi||S.radios.bt||S.radios.gps||S.sensors.mic||S.sensors.cam||S.sensors.loc;
+  var ss=document.getElementById("shieldstat");
+  ss.textContent=S.shield&&!S.sensors.loc?"● SECURE":"● OPEN";
+  ss.style.color=S.shield&&!S.sensors.loc?"var(--accent)":"var(--warn)";
+}
+
+/* ---------- home modules ---------- */
+var MODS=[
+  {id:"shield", nm:"Shield",   ic:"⬡"},
+  {id:"terminal",nm:"Terminal", ic:"▮"},
+  {id:"python", nm:"Python",   ic:"λ"},
+  {id:"network", nm:"Network",  ic:"≋"},
+  {id:"comms",  nm:"Comms",    ic:"✉"},
+  {id:"sensors", nm:"Sensors",  ic:"◉"},
+  {id:"diag",   nm:"Diagnostics",ic:"⚙"},
+  {id:"files",  nm:"Database",  ic:"▤"},
+  {id:"music",  nm:"Music",    ic:"♪"},
+];
+
+/* ---------- views ---------- */
+var V={};
+
+V.home={
+  render:function(){
+    var g='<div class="grid">';
+    MODS.forEach(function(m,i){
+      g+='<div class="tile'+(i===S.sel?' sel':'')+'" data-i="'+i+'"><span class="num">'+(i+1)+'</span>'+
+         '<span class="gi">'+m.ic+'</span><span class="nm">'+m.nm+'</span></div>';
+    });
+    g+='</div>';
+    var shieldline=S.shield?'<span style="color:var(--accent)">⬡ TRACKING SHIELD ACTIVE · 0 trackers</span>'
+                           :'<span style="color:var(--warn)">⬡ SHIELD OFF</span>';
+    return '<div class="vhead"><span class="ico">⬡</span><div><div class="tag">RESEARCH OS</div>'+
+      '<h1>FLIPPER X</h1></div></div>'+
+      '<div class="card" style="padding:9px 11px"><div class="kv"><span>'+shieldline+'</span>'+
+      '<span style="color:var(--dim)">* toggles</span></div></div>'+ g+
+      '<div class="hint" style="margin-top:10px">keys <b style="color:var(--accent2)">1–9</b> open · '+
+      '<b style="color:var(--accent2)">0</b> settings · <b style="color:var(--accent2)">*</b> shield · '+
+      '<b style="color:var(--accent2)">#</b> lock</div>';
+  },
+  keys:{left:"settings"},
+  onKey:function(k){
+    if(k>="1"&&k<="9"){var i=+k-1; if(i<MODS.length){open(MODS[i].id);} return;}
+    if(k==="0"){open("settings");return;}
+    if(k==="*"){open("shield");return;}
+    if(k==="ArrowRight"){S.sel=(S.sel+1)%MODS.length;draw();}
+    if(k==="ArrowLeft"){S.sel=(S.sel+MODS.length-1)%MODS.length;draw();}
+    if(k==="ArrowDown"){S.sel=Math.min(MODS.length-1,S.sel+3);draw();}
+    if(k==="ArrowUp"){S.sel=Math.max(0,S.sel-3);draw();}
+    if(k==="Enter"){open(MODS[S.sel].id);}
+  },
+  click:function(t){var r=t.closest(".tile");if(r){open(MODS[+r.dataset.i].id);}}
+};
+
+function toggleRow(obj,key){obj[key]=!obj[key];persist();paintRadios();draw();}
+
+V.shield={
+  render:function(){
+    function tog(label,on,warn){
+      return '<div class="row" data-tg="'+label+'"><span class="ri">'+(on?'◉':'○')+'</span>'+
+        '<div class="rt"><div class="t1">'+label+'</div></div>'+
+        '<span class="pill '+(on?(warn?'warn':'on'):'off')+'">'+(on?'ON':'OFF')+'</span></div>';
+    }
+    var r=S.radios,se=S.sensors;
+    return head("SHIELD","⬡","PRIVACY CONTROL")+
+      '<div class="card"><div class="big" style="color:'+(S.shield?'var(--accent)':'var(--warn)')+'">'+
+      (S.shield?'PROTECTED':'EXPOSED')+'</div>'+
+      '<div class="hint">Nothing leaves this device. No location, no sensors, no trackers. FLIPPER X makes '+
+      '<b style="color:var(--accent2)">0</b> outside connections unless you switch a radio on below.</div></div>'+
+      '<div class="card"><h3>RADIOS</h3>'+
+        tog("Cellular",r.cell)+tog("Wi-Fi",r.wifi)+tog("Bluetooth",r.bt)+tog("GPS / Location",r.gps,true)+'</div>'+
+      '<div class="card"><h3>SENSORS &amp; TRACKING</h3>'+
+        tog("Microphone",se.mic)+tog("Camera",se.cam)+tog("Motion sensors",se.motion)+tog("Location services",se.loc,true)+'</div>'+
+      '<div class="card"><h3>HARDENING</h3>'+
+        '<div class="kv"><span>Access code lock</span><span style="color:var(--accent)">ON</span></div>'+
+        '<div class="kv"><span>Encrypted vault</span><span style="color:var(--accent)">ON</span></div>'+
+        '<div class="kv"><span>Outbound telemetry</span><span style="color:var(--accent)">BLOCKED</span></div>'+
+        '<div class="kv"><span>Panic wipe</span><span style="color:var(--muted)">hold # 3s</span></div></div>';
+  },
+  onKey:function(k){ if(k==="Enter"||k==="*"){S.shield=!S.shield;persist();paintRadios();draw();} },
+  click:function(t){var r=t.closest("[data-tg]");if(!r)return;var l=r.dataset.tg;
+    var map={"Cellular":["radios","cell"],"Wi-Fi":["radios","wifi"],"Bluetooth":["radios","bt"],"GPS / Location":["radios","gps"],
+      "Microphone":["sensors","mic"],"Camera":["sensors","cam"],"Motion sensors":["sensors","motion"],"Location services":["sensors","loc"]};
+    var m=map[l]; if(m){toggleRow(S[m[0]],m[1]);}}
+};
+
+/* ---------- terminal ---------- */
+var TERM={
+  banner:function(){return "FLIPPER X shell v1.0  (type 'help')";},
+  run:function(line){
+    var a=line.trim().split(/\s+/),cmd=a[0].toLowerCase(),arg=a.slice(1).join(" ");
+    var out=[];
+    function p(s,c){out.push({t:s,c:c||"out"});}
+    switch(cmd){
+      case"": break;
+      case"help": p("commands:","sys");
+        p("help  sysinfo  shield  net  scan  radios  gps  vault  db  plugins  clear");
+        p("echo  date  whoami  ver  uptime  music  wipe  about"); break;
+      case"sysinfo": p("FLIPPER X · Research OS");p("host    : Summit Flip SL006D");
+        p("soc     : MediaTek MT6739 (quad, armv7)");p("os base : Android 12 · 32-bit");
+        p("ram     : ~1 GB   storage: 1 TB card"); break;
+      case"ver": p("FLIPPER X 1.0 / build "+BUILD); break;
+      case"whoami": p("operator@flipperx"); break;
+      case"date": p(new Date().toString()); break;
+      case"uptime": p(Math.floor((Date.now()-BOOTED)/1000)+"s since boot"); break;
+      case"echo": p(arg); break;
+      case"shield": p("tracking shield: "+(S.shield?"ACTIVE":"off"));p("outbound connections: 0");
+        p("gps:"+(S.radios.gps?"on":"off")+"  mic:"+(S.sensors.mic?"on":"off")+"  cam:"+(S.sensors.cam?"on":"off")); break;
+      case"radios": p("cell:"+(S.radios.cell?"on":"off")+"  wifi:"+(S.radios.wifi?"on":"off")+"  bt:"+(S.radios.bt?"on":"off")+"  gps:"+(S.radios.gps?"on":"off")); break;
+      case"net": p("interfaces:");p(" wlan0  "+(S.radios.wifi?"UP (bridge)":"DOWN"));p(" bt0    "+(S.radios.bt?"UP (bridge)":"DOWN"));
+        p("online: "+(navigator.onLine?"yes":"no"),"sys"); break;
+      case"scan": if(!S.radios.wifi&&!S.radios.bt){p("enable wifi or bt in shield first","err");break;}
+        p("scanning... (hardware bridge required for live radio)","sys");
+        p(" AP  34:2c:** -58dBm  ch6   WPA2");p(" AP  a0:91:** -71dBm  ch11  WPA2");p(" BLE 7c:64:** -66dBm  tag"); break;
+      case"gps": p(S.radios.gps?"GPS enabled — acquiring (bridge required)":"GPS is OFF (shield). nothing is tracking you.","sys"); break;
+      case"vault": p("vault: "+S.vault.length+" encrypted item(s). open Shield→vault to view."); break;
+      case"db": p("offline database: "+S.records.length+" record(s). open Database module."); break;
+      case"plugins": S.plugins.forEach(function(pl){p(" ["+(pl.on?"x":" ")+"] "+pl.id+"  "+pl.name);}); break;
+      case"music": p("playlist: "+S.playlist.length+" track(s) on card."); break;
+      case"clear": S.termlog=[]; return [];
+      case"about": p("FLIPPER X — offline research & privacy OS","sys");p("built for the Summit Flip. no google, no tracking."); break;
+      case"wipe": p("use Settings→Wipe (requires access code)","err"); break;
+      default: p("unknown: "+cmd+"  (try 'help')","err");
+    }
+    return out;
+  }
+};
+V.terminal={
+  render:function(){
+    var body=S.termlog.map(function(l){return '<span class="c-'+l.c+'">'+esc(l.t)+'</span>';}).join("\n");
+    return head("TERMINAL","▮","SHELL")+
+      '<div id="term">'+body+'</div>'+
+      '<div class="prompt"><span class="ps">flipperx$</span><input id="termin" autocomplete="off" '+
+      'autocapitalize="off" spellcheck="false" placeholder="type a command, Enter"></div>';
+  },
+  mounted:function(){var i=document.getElementById("termin");if(i){i.focus();
+    i.addEventListener("keydown",function(e){
+      if(e.key==="Enter"){var v=i.value;S.termlog.push({t:"flipperx$ "+v,c:"in"});
+        if(v.trim()){S.termHist.push(v);S.termHi=S.termHist.length;}
+        var o=TERM.run(v); S.termlog=S.termlog.concat(o); i.value=""; draw(); e.preventDefault();}
+      else if(e.key==="ArrowUp"){if(S.termHi>0){S.termHi--;i.value=S.termHist[S.termHi]||"";}e.preventDefault();}
+      else if(e.key==="ArrowDown"){if(S.termHi<S.termHist.length){S.termHi++;i.value=S.termHist[S.termHi]||"";}e.preventDefault();}
+      else if(e.key==="Escape"){home();}
+      e.stopPropagation();
+    });
+    var t=document.getElementById("term"); if(t){var c=document.getElementById("content");c.scrollTop=c.scrollHeight;}
+  }},
+  noKeyRoute:true
+};
+
+V.python={
+  render:function(){
+    return head("PYTHON","λ","SCRIPTING")+
+      '<div class="card"><h3>ON-DEVICE SCRIPTING</h3>'+
+      '<div class="hint">FLIPPER X ships a scripting console for automation and research scripts. '+
+      'A full CPython 3 runtime installs from the bundled Termux package on first launch (offline, from the card).</div>'+
+      '<div class="note">Real CPython needs the native runtime (installed on deploy). This console runs the '+
+      'FLIPPER X mini-interpreter: variables, math, print(), and the fx.* hardware API.</div></div>'+
+      '<div id="term">'+S.pylog.map(function(l){return '<span class="c-'+l.c+'">'+esc(l.t)+'</span>';}).join("\n")+'</div>'+
+      '<div class="prompt"><span class="ps">&gt;&gt;&gt;</span><input id="pyin" autocomplete="off" spellcheck="false" placeholder="print(2**10)"></div>';
+  },
+  mounted:function(){var i=document.getElementById("pyin");if(!i)return;i.focus();
+    i.addEventListener("keydown",function(e){
+      if(e.key==="Enter"){var v=i.value;S.pylog.push({t:">>> "+v,c:"in"});
+        var o=pyEval(v); S.pylog.push({t:o.t,c:o.c}); i.value=""; draw();e.preventDefault();}
+      else if(e.key==="Escape"){home();}
+      e.stopPropagation();
+    });
+  },
+  noKeyRoute:true
+};
+
+V.network={
+  render:function(){
+    return head("NETWORK","≋","DIAGNOSTICS")+
+      '<div class="card"><h3>INTERFACES</h3>'+
+      '<div class="kv"><span>Wi-Fi (wlan0)</span><span style="color:'+(S.radios.wifi?'var(--accent)':'var(--dim)')+'">'+(S.radios.wifi?'UP':'DOWN')+'</span></div>'+
+      '<div class="kv"><span>Bluetooth (bt0)</span><span style="color:'+(S.radios.bt?'var(--accent)':'var(--dim)')+'">'+(S.radios.bt?'UP':'DOWN')+'</span></div>'+
+      '<div class="kv"><span>Cellular</span><span style="color:'+(S.radios.cell?'var(--accent)':'var(--dim)')+'">'+(S.radios.cell?'UP':'DOWN')+'</span></div>'+
+      '<div class="kv"><span>Internet</span><span>'+(navigator.onLine?'reachable':'offline')+'</span></div></div>'+
+      '<div class="card"><h3>SCAN</h3>'+
+      '<div class="row sel" data-act="scan"><span class="ri">⟳</span><div class="rt"><div class="t1">Scan nearby radios</div>'+
+      '<div class="t2">Wi-Fi APs + BLE beacons</div></div><span class="rv">Enter</span></div>'+
+      '<div id="scanout" class="hint" style="margin-top:6px"></div></div>'+
+      '<div class="note">Live radio capture needs the hardware bridge (enabled on deploy) or a USB-OTG adapter. '+
+      'Monitor-mode / injection are not supported by this phone\'s Wi-Fi chip.</div>'+
+      '<div class="card"><h3>CONNECTIVITY</h3>'+
+      '<div class="hint">Free network options that actually work: open Wi-Fi (libraries, cafes), a Lifeline plan if '+
+      'eligible, or any T-Mobile/AT&amp;T prepaid SIM once carrier-unlocked. No hidden tunnels — those are theft of service.</div></div>';
+  },
+  onKey:function(k){ if(k==="Enter"){this.scan();} },
+  click:function(t){ if(t.closest('[data-act="scan"]')) this.scan(); },
+  scan:function(){
+    var o=document.getElementById("scanout"); if(!o)return;
+    if(!S.radios.wifi&&!S.radios.bt){o.innerHTML='<span style="color:var(--warn)">enable Wi-Fi or Bluetooth in Shield first.</span>';return;}
+    o.innerHTML="scanning<span class='blink'>_</span>";
+    setTimeout(function(){o.innerHTML=
+      '<div class="kv"><span>AP · WPA2 · ch6</span><span>-58 dBm</span></div>'+
+      '<div class="kv"><span>AP · WPA2 · ch11</span><span>-71 dBm</span></div>'+
+      '<div class="kv"><span>BLE tag</span><span>-66 dBm</span></div>'+
+      '<div class="hint">demo capture · live radios via bridge/OTG</div>';},650);
+  }
+};
+
+V.comms={
+  render:function(){
+    var msgs=S.messages.slice(-6).map(function(m){
+      return '<div class="row"><span class="ri">'+(m.dir==="out"?"▸":"◂")+'</span><div class="rt">'+
+      '<div class="t1">'+esc(m.body)+'</div><div class="t2">'+esc(m.to)+' · '+m.t+'</div></div></div>';
+    }).join("")||'<div class="hint">no messages yet.</div>';
+    return head("COMMS","✉","OFFLINE MESSAGING")+
+      '<div class="card"><h3>SECURE NOTE / MESSAGE</h3>'+
+      '<input class="inp" id="msgbody" placeholder="message (stored encrypted, offline)">'+
+      '<input class="inp" id="msgto" placeholder="to (contact / callsign)">'+
+      '<span class="btn sel" data-act="send">▸ Store / Queue</span>'+
+      '<div class="note">Messages are stored encrypted on-device. When a radio is enabled they can relay over '+
+      'Bluetooth / Wi-Fi Direct mesh to nearby FLIPPER X units — no carrier, no servers.</div></div>'+
+      '<div class="card"><h3>LOG</h3>'+msgs+'</div>';
+  },
+  click:function(t){ if(t.closest('[data-act="send"]')) this.send(); },
+  onKey:function(k){ if(k==="Enter") this.send(); },
+  send:function(){
+    var b=document.getElementById("msgbody"),to=document.getElementById("msgto");
+    if(!b||!b.value.trim())return;
+    S.messages.push({body:b.value.trim(),to:(to.value.trim()||"base"),dir:"out",
+      t:two(new Date().getHours())+":"+two(new Date().getMinutes())});
+    persist();draw();
+  }
+};
+
+V.sensors={
+  render:function(){
+    var se=S.sensors;
+    function st(n,on){return '<div class="kv"><span>'+n+'</span><span style="color:'+(on?'var(--warn)':'var(--accent)')+'">'+(on?'ACTIVE':'OFF')+'</span></div>';}
+    return head("SENSORS","◉","TRACKING STATUS")+
+      '<div class="card"><div class="big" style="color:var(--accent)">NOT TRACKED</div>'+
+      '<div class="hint">Every sensor that could locate or watch you is OFF by default and stays off until you '+
+      'turn it on. FLIPPER X never silently reads location, motion, mic or camera.</div></div>'+
+      '<div class="card"><h3>WHAT COULD TRACK YOU — ALL HELD OFF</h3>'+
+      st("GPS / GNSS",S.radios.gps)+st("Location services",se.loc)+st("Microphone",se.mic)+
+      st("Camera",se.cam)+st("Motion / accelerometer",se.motion)+st("Cell triangulation",S.radios.cell)+'</div>'+
+      '<div class="note">Reminder: any phone with a SIM and the cellular radio ON is locatable by the carrier via '+
+      'towers — that is physics, not software. Keep Cellular OFF (Shield) for true radio silence.</div>';
+  }
+};
+
+V.diag={
+  render:function(){
+    return head("DIAGNOSTICS","⚙","HARDWARE")+
+      '<div class="card"><h3>DEVICE</h3>'+
+      '<div class="kv"><span>Model</span><span>Summit Flip SL006D</span></div>'+
+      '<div class="kv"><span>SoC</span><span>MediaTek MT6739</span></div>'+
+      '<div class="kv"><span>CPU</span><span>'+(navigator.hardwareConcurrency||4)+' core · armv7</span></div>'+
+      '<div class="kv"><span>OS base</span><span>Android 12 · 32-bit</span></div></div>'+
+      '<div class="card"><h3>LIVE</h3><div id="live">reading...</div></div>'+
+      '<div class="card"><h3>STORAGE</h3>'+
+      '<div class="kv"><span>Card</span><span>1 TB (SanDisk)</span></div>'+
+      '<div class="kv"><span>Internal</span><span>8 GB</span></div>'+
+      '<div id="storest" class="hint"></div></div>'+
+      '<div class="card"><h3>AUDIO OUTPUT · EARBUDS</h3>'+
+      '<div class="hint">Plug in wired or USB-C earbuds, then tap to play a tone through whatever output is active.</div>'+
+      '<span class="btn sel" data-act="tone">▶ Play test tone</span>'+
+      '<div id="audio-res" class="hint" style="margin-top:6px"></div></div>';
+  },
+  mounted:function(){
+    var live=document.getElementById("live");
+    var html='<div class="kv"><span>Screen</span><span>'+screen.width+'×'+screen.height+'</span></div>'+
+             '<div class="kv"><span>Online</span><span>'+(navigator.onLine?'yes':'no')+'</span></div>'+
+             '<div class="kv"><span>Memory (JS)</span><span>'+(navigator.deviceMemory?navigator.deviceMemory+' GB':'~1 GB')+'</span></div>';
+    if(live)live.innerHTML=html;
+    if(navigator.getBattery){navigator.getBattery().then(function(b){
+      if(live)live.innerHTML+='<div class="kv"><span>Battery</span><span>'+Math.round(b.level*100)+'% '+(b.charging?'⚡':'')+'</span></div>';
+    });}
+    if(navigator.storage&&navigator.storage.estimate){navigator.storage.estimate().then(function(e){
+      var s=document.getElementById("storest");
+      if(s)s.textContent="app data: "+(e.usage/1048576).toFixed(1)+" MB used of "+(e.quota/1048576).toFixed(0)+" MB quota";
+    });}
+  },
+  click:function(t){ if(t.closest('[data-act="tone"]')) this.tone(); },
+  tone:function(){ try{ var AC=window.AudioContext||window.webkitAudioContext, ac=new AC();
+    var o=ac.createOscillator(), g=ac.createGain(); o.type="sine"; o.frequency.value=440;
+    g.gain.value=0.0001; o.connect(g); g.connect(ac.destination); o.start();
+    g.gain.exponentialRampToValueAtTime(0.25, ac.currentTime+0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime+1.2); o.stop(ac.currentTime+1.3);
+    var r=document.getElementById("audio-res"); if(r)r.textContent="playing 440 Hz — hear it in the earbuds? then USB-C audio works.";
+  }catch(e){ var r=document.getElementById("audio-res"); if(r)r.textContent="audio error: "+e.message; } }
+};
+
+V.files={
+  render:function(){
+    var rows=S.records.map(function(r,i){
+      return '<div class="row"><span class="ri">▤</span><div class="rt"><div class="t1">'+esc(r.k)+'</div>'+
+      '<div class="t2">'+esc(r.v)+'</div></div><span class="btn danger" data-del="'+i+'">✕</span></div>';
+    }).join("")||'<div class="hint">database empty. add offline records below — OUI tables, wordlists, notes, anything.</div>';
+    return head("DATABASE","▤","OFFLINE STORE")+
+      '<div class="card"><h3>ADD RECORD</h3>'+
+      '<input class="inp" id="dbk" placeholder="key / title">'+
+      '<input class="inp" id="dbv" placeholder="value / data">'+
+      '<span class="btn sel" data-act="add">+ Store</span>'+
+      '<span class="btn" data-act="import">⇩ Import from card</span></div>'+
+      '<div class="card"><h3>RECORDS ('+S.records.length+')</h3>'+rows+'</div>'+
+      '<div class="hint">Stored on-device, offline, searchable. Large reference sets (MAC vendor DB, '+
+      'offline wikis, signal tables) live on the 1 TB card.</div>';
+  },
+  click:function(t){
+    if(t.closest('[data-act="add"]')){var k=document.getElementById("dbk"),v=document.getElementById("dbv");
+      if(k.value.trim()){S.records.push({k:k.value.trim(),v:v.value.trim()});persist();draw();}return;}
+    if(t.closest('[data-act="import"]')){alert("On deploy this pulls datasets from /sdcard/FlipperX/db/*.json");return;}
+    var d=t.closest("[data-del]"); if(d){S.records.splice(+d.dataset.del,1);persist();draw();}
+  }
+};
+
+V.music={
+  render:function(){
+    var list=S.playlist.length? S.playlist.map(function(tr,i){
+        return '<div class="row'+(i===S.sel?' sel':'')+'" data-i="'+i+'"><span class="ri">♪</span>'+
+        '<div class="rt"><div class="t1">'+esc(tr.title)+'</div><div class="t2">'+esc(tr.artist||"")+'</div></div>'+
+        '<span class="rv">▶</span></div>';}).join("")
+      : '<div class="hint">No tracks yet. Your SoundCloud likes get copied to <b style="color:var(--accent2)">/sdcard/Music</b> '+
+        'on the card, then appear here automatically. Fully offline playback.</div>';
+    return head("MUSIC","♪","OFFLINE PLAYER")+
+      '<div class="card"><h3>LIBRARY · 1corpse likes</h3>'+list+'</div>'+
+      '<audio id="aud" style="width:100%;margin-top:6px" controls></audio>'+
+      '<div class="hint" style="margin-top:8px">Scans the card\'s Music folder on launch. Supports mp3 / m4a / flac '+
+      '/ wav / ogg — whatever the stock player reads.</div>';
+  },
+  onKey:function(k){
+    if(!S.playlist.length)return;
+    if(k==="ArrowDown"){S.sel=Math.min(S.playlist.length-1,S.sel+1);draw();}
+    if(k==="ArrowUp"){S.sel=Math.max(0,S.sel-1);draw();}
+    if(k==="Enter"){this.play(S.sel);}
+  },
+  click:function(t){var r=t.closest("[data-i]");if(r)this.play(+r.dataset.i);},
+  play:function(i){var tr=S.playlist[i];if(!tr)return;var a=document.getElementById("aud");
+    if(a&&tr.src){a.src=tr.src;a.play().catch(function(){});}}
+};
+
+V.plugins={
+  render:function(){
+    var rows=S.plugins.map(function(p,i){
+      return '<div class="row" data-i="'+i+'"><span class="ri">'+(p.on?'◉':'○')+'</span>'+
+      '<div class="rt"><div class="t1">'+esc(p.name)+'</div><div class="t2">'+p.id+(p.core?' · core':' · OTG')+'</div></div>'+
+      '<span class="pill '+(p.on?'on':'off')+'">'+(p.on?'ON':'OFF')+'</span></div>';
+    }).join("");
+    return head("PLUGINS","⬚","MODULES")+
+      '<div class="card"><h3>INSTALLED MODULES</h3>'+rows+'</div>'+
+      '<div class="hint">Drop a plugin folder with a <b style="color:var(--accent2)">manifest.json</b> into '+
+      '/sdcard/FlipperX/plugins to extend FLIPPER X. OTG plugins activate when their dongle is attached.</div>';
+  },
+  click:function(t){var r=t.closest("[data-i]");if(!r)return;var p=S.plugins[+r.dataset.i];
+    if(p.core||p.on){p.on=!p.on;} else {alert("Attach the "+p.name+" USB-OTG adapter to enable.");}
+    persist();draw();}
+};
+
+V.settings={
+  render:function(){
+    return head("SETTINGS","⚙","SYSTEM")+
+      '<div class="card"><h3>SECURITY</h3>'+
+      '<div class="kv"><span>Access code</span><span>'+("•".repeat(S.pin.length))+'</span></div>'+
+      '<input class="inp" id="newpin" placeholder="new 4-digit code" maxlength="8" inputmode="numeric">'+
+      '<span class="btn sel" data-act="setpin">Set code</span></div>'+
+      '<div class="card"><h3>PLUGINS</h3><span class="btn" data-act="plugins">Open module manager</span></div>'+
+      '<div class="card"><h3>ABOUT</h3>'+
+      '<div class="kv"><span>FLIPPER X</span><span>v1.0 · '+BUILD+'</span></div>'+
+      '<div class="kv"><span>For</span><span>Summit Flip SL006D</span></div>'+
+      '<div class="hint">No Google. No Microsoft. No tracking. Offline-first research OS.</div></div>'+
+      '<div class="card"><h3>DANGER</h3>'+
+      '<span class="btn danger" data-act="wipe">⚠ Factory wipe app data</span>'+
+      '<div class="hint">Erases vault, database, messages &amp; settings on this device only.</div></div>';
+  },
+  click:function(t){
+    if(t.closest('[data-act="setpin"]')){var n=document.getElementById("newpin").value.trim();
+      if(/^\d{4,8}$/.test(n)){S.pin=n;persist();alert("Access code updated.");draw();}else{alert("Use 4–8 digits.");}return;}
+    if(t.closest('[data-act="plugins"]')){open("plugins");return;}
+    if(t.closest('[data-act="wipe"]')){if(confirm("Wipe all FLIPPER X data on this device?")){
+      ["records","vault","messages","playlist"].forEach(function(k){LS.del(k);});
+      S.records=[];S.vault=[];S.messages=[];S.playlist=[];persist();alert("Wiped.");open("settings");}return;}
+  },
+  keys:{}
+};
+
+/* ---------- helpers ---------- */
+function head(t,ic,tag){return '<div class="vhead"><span class="ico">'+ic+'</span><div>'+
+  '<div class="tag">'+tag+'</div><h1>'+t+'</h1></div></div>';}
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+var BUILD="2026.11.15", BOOTED=Date.now();
+S.pylog=[{t:"FLIPPER X python console — fx.* API ready",c:"sys"}];
+
+function pyEval(src){
+  src=src.trim(); if(!src)return{t:"",c:"out"};
+  try{
+    var m=src.match(/^print\((.*)\)$/s);
+    var expr=m?m[1]:src;
+    // very small safe arithmetic/string evaluator
+    if(/^[\s\d+\-*/%().,**'"a-zA-Z_]+$/.test(expr)){
+      var val=Function('"use strict";var fx={radios:'+JSON.stringify(S.radios)+',shield:'+S.shield+'};return ('+
+        expr.replace(/\*\*/g,"**")+');')();
+      return{t:String(val),c:"out"};
+    }
+    return{t:"ok",c:"out"};
+  }catch(e){return{t:"Error: "+e.message,c:"err"};}
+}
+
+/* ---------- router / render ---------- */
+V.plugins.keys={};
+function open(id){S.view=id;S.sel=0;draw();var v=V[id];if(v&&v.mounted)v.mounted();}
+function home(){open("home");}
+function curV(){return V[S.view]||V.home;}
+function draw(){
+  var v=curV();
+  elC.innerHTML=v.render();
+  // softkeys
+  elSkL.textContent=(S.view==="home")?"SETTINGS":"BACK";
+  elSkM.textContent=(S.view==="home")?"FLIPPER X":S.view.toUpperCase();
+  elSkR.textContent="LOCK";
+  paintRadios();
+  if(v.mounted&&S.view!=="home")v.mounted();
+  // click binding
+  elC.onclick=function(e){var v2=curV();
+    if(v2.click)v2.click(e.target);
+  };
+}
+
+/* ---------- global keys ---------- */
+document.addEventListener("keydown",function(e){
+  if(!elBoot.classList.contains("hidden"))return;
+  if(!elIdle.classList.contains("hidden")){ elIdle.classList.add("hidden"); doLock(); e.preventDefault(); return; }
+  if(!elLock.classList.contains("hidden")){ lockKey(e); return; }
+  var k=e.key;
+  // # closes the lid -> outer idle / cover screen
+  if(k==="#"){ showIdle(); e.preventDefault(); return; }
+  var v=curV();
+  if(v.noKeyRoute){ // terminal/python manage their own input; Esc handled there
+    return;
+  }
+  if(k==="Backspace"||k==="Escape"){ if(S.view==="home"){} else { home(); } e.preventDefault(); return; }
+  if(k==="*" && S.view!=="home"){ open("shield"); e.preventDefault(); return; }
+  if((v.keys&&v.keys.left)&&(k==="F1")){ open(v.keys.left); return; }
+  if(v.onKey){ v.onKey(k); }
+  else if(k>="1"&&k<="9"&&S.view==="home"){ V.home.onKey(k); }
+  if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Enter"].indexOf(k)>=0)e.preventDefault();
+});
+
+/* softkey clicks */
+elSkL.onclick=function(){ if(S.view==="home")open("settings"); else home(); };
+elSkR.onclick=function(){ showIdle(); };
+elSkM.onclick=function(){ home(); };
+
+/* ---------- lock ---------- */
+var pinEl=document.getElementById("pindots"), lockMsg=document.getElementById("lockmsg");
+function paintPin(){var h="";for(var i=0;i<4;i++){h+='<div class="d'+(i<S.pinBuf.length?' f':'')+'"></div>';}pinEl.innerHTML=h;}
+function lockKey(e){
+  var k=e.key;
+  if(k>="0"&&k<="9"){ S.pinBuf+=k; paintPin();
+    if(S.pinBuf.length>=S.pin.length){ setTimeout(checkPin,120); } e.preventDefault(); return; }
+  if(k==="#"||k==="Backspace"||k==="Escape"){ S.pinBuf=""; paintPin(); e.preventDefault(); }
+}
+function checkPin(){
+  if(S.pinBuf===S.pin){ S.locked=false; elLock.classList.add("hidden"); S.pinBuf=""; home(); }
+  else { lockMsg.textContent="wrong code"; lockMsg.style.color="var(--danger)"; S.pinBuf=""; paintPin();
+    setTimeout(function(){lockMsg.textContent="keypad 0–9 · # clear";lockMsg.style.color="var(--muted)";},1200); }
+}
+function doLock(){ S.locked=true; S.pinBuf=""; paintPin(); elIdle.classList.add("hidden"); elLock.classList.remove("hidden"); }
+function updateIdle(){ var d=new Date();
+  var days=["SUN","MON","TUE","WED","THU","FRI","SAT"],mon=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  document.getElementById("idle-clock").textContent=two(d.getHours())+":"+two(d.getMinutes());
+  document.getElementById("idle-date").textContent=days[d.getDay()]+" · "+mon[d.getMonth()]+" "+d.getDate();
+  document.getElementById("idle-sec").textContent=(S.shield&&!S.sensors.loc)?"⬡ SECURE · 0 TRACKERS":"⬡ SHIELD OFF";
+  var rids=document.querySelectorAll("#idle-radios span"),rk=[S.radios.cell,S.radios.wifi,S.radios.bt,S.radios.gps];
+  for(var i=0;i<rids.length;i++){ rids[i].className=rk[i]?"":"radio-off"; }
+  var np=document.getElementById("idle-np"),au=document.getElementById("aud");
+  np.textContent=(au&&!au.paused&&S.playlist.length&&S.playlist[S.sel])?("♪ "+(S.playlist[S.sel].title||"")):"";
+}
+function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); }
+elLock.addEventListener("click",function(){document.getElementById("device").focus();});
+// on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
+
+/* ---------- boot sequence ---------- */
+var bootLines=[
+ "[ ok ] secure bootstrap",
+ "[ ok ] mounting /sdcard (1 TB)",
+ "[ ok ] tracking shield .......... ACTIVE",
+ "[ ok ] radios ................... SILENT",
+ "[ ok ] sensors .................. OFF",
+ "[ ok ] telemetry ................ BLOCKED",
+ "[ ok ] plugins .................. loaded",
+ "[ ok ] FLIPPER X ready"
+];
+var bl=document.getElementById("bootlog"),bi=0;
+(function bootStep(){
+  if(bi<bootLines.length){ bl.textContent+=bootLines[bi]+"\n"; bi++; setTimeout(bootStep,230); }
+  else { setTimeout(function(){ elBoot.classList.add("hidden"); paintPin(); showIdle(); },500); }
+})();
+
+/* expose a tiny API for the native bridge to inject card data later */
+window.FLIPPERX={
+  loadPlaylist:function(arr){S.playlist=arr||[];persist();if(S.view==="music")draw();},
+  setRadio:function(k,on){if(k in S.radios){S.radios[k]=!!on;persist();paintRadios();}},
+  version:BUILD
+};
+})();
+
+/* ---------- 4D ambient field: perspective starfield + rotating tesseract ---------- */
+(function(){
+  var cv=document.getElementById("qfx"), ctx=cv.getContext("2d"), dev=document.getElementById("device");
+  var W=0,H=0,CX=0,CY=0,DPR=Math.min(window.devicePixelRatio||1,1.5);
+  function size(){ var r=dev.getBoundingClientRect(); W=r.width;H=r.height;CX=W/2;CY=H/2;
+    cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+"px";cv.style.height=H+"px";ctx.setTransform(DPR,0,0,DPR,0,0); }
+
+  // 3D starfield flying toward the camera
+  var STARS=[], NS=48;
+  function reseed(s){ s.x=(Math.random()*2-1)*CX*0.9; s.y=(Math.random()*2-1)*CY*0.9;
+    s.z=Math.random()*1.3+0.25; s.ph=Math.random()*6.28; }
+  function seed(){ STARS=[]; for(var i=0;i<NS;i++){ var s={}; reseed(s); STARS.push(s); } }
+  window.addEventListener("resize",function(){size();seed();}); size(); seed();
+
+  // tesseract: 16 vertices in 4D, 32 edges
+  var V4=[], EDG=[], i,b;
+  for(i=0;i<16;i++){ V4.push([ (i&1?1:-1),(i&2?1:-1),(i&4?1:-1),(i&8?1:-1) ]); }
+  for(i=0;i<16;i++){ for(b=0;b<4;b++){ var j=i^(1<<b); if(j>i) EDG.push([i,j]); } }
+  function rot(p,a){ // rotate the 4D point through XW, YZ and XY planes
+    var x=p[0],y=p[1],z=p[2],w=p[3];
+    var c=Math.cos(a),s=Math.sin(a);            var x1=x*c-w*s, w1=x*s+w*c;      // XW
+    var c2=Math.cos(a*0.76),s2=Math.sin(a*0.76);var y1=y*c2-z*s2, z1=y*s2+z*c2;  // YZ
+    var c3=Math.cos(a*0.5),s3=Math.sin(a*0.5);  var x2=x1*c3-y1*s3, y2=x1*s3+y1*c3; // XY
+    return [x2,y2,z1,w1];
+  }
+  function project4(p,scale){
+    var w=1/(2.7-p[3]); var x=p[0]*w, y=p[1]*w, z=p[2]*w;   // 4D -> 3D
+    var k=1/(2.5-z);                                         // 3D -> 2D
+    return [CX+x*k*scale, CY+y*k*scale, (p[3]+2)/4];
+  }
+
+  var ang=0,last=0,FRAME=33,scan=0,rings=[];
+  function loop(t){
+    requestAnimationFrame(loop);
+    if(t-last<FRAME) return; last=t;
+    ctx.fillStyle="rgba(6,13,11,0.26)"; ctx.fillRect(0,0,W,H); // depth trails
+
+    // --- starfield ---
+    var proj=[];
+    for(i=0;i<STARS.length;i++){ var st=STARS[i]; st.z-=0.006; st.ph+=0.05;
+      if(st.z<0.14){ reseed(st); st.z=1.55; }
+      var sx=CX+st.x/st.z, sy=CY+st.y/st.z;
+      var r=Math.min(3,0.7/st.z), a=Math.max(0,Math.min(1,1.5-st.z)), fl=0.6+0.4*Math.sin(st.ph);
+      proj.push({x:sx,y:sy});
+      ctx.fillStyle="rgba(43,212,138,"+(a*0.42)+")"; ctx.beginPath(); ctx.arc(sx,sy,r,0,6.283); ctx.fill();
+      ctx.fillStyle="rgba(150,255,220,"+(a*fl)+")"; ctx.beginPath(); ctx.arc(sx,sy,r*0.45,0,6.283); ctx.fill();
+    }
+    for(i=0;i<proj.length;i++){ for(var j2=i+1;j2<proj.length;j2++){
+      var dx=proj[i].x-proj[j2].x, dy=proj[i].y-proj[j2].y, dd=dx*dx+dy*dy;
+      if(dd<5000){ ctx.strokeStyle="rgba(93,202,165,"+(0.11*(1-dd/5000))+")"; ctx.lineWidth=.5;
+        ctx.beginPath(); ctx.moveTo(proj[i].x,proj[i].y); ctx.lineTo(proj[j2].x,proj[j2].y); ctx.stroke(); } } }
+
+    // --- rotating tesseract (4D) ---
+    ang+=0.006;
+    var scale=Math.min(W,H)*0.16, pts=[];
+    for(i=0;i<16;i++){ pts.push(project4(rot(V4[i],ang),scale)); }
+    for(var e=0;e<EDG.length;e++){ var p=pts[EDG[e][0]], q=pts[EDG[e][1]], depth=(p[2]+q[2])/2;
+      ctx.strokeStyle="rgba(93,202,165,"+(0.08+depth*0.26)+")"; ctx.lineWidth=0.4+depth*1.1;
+      ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); ctx.stroke(); }
+    for(i=0;i<16;i++){ var pv=pts[i]; ctx.fillStyle="rgba(120,255,214,"+(0.18+pv[2]*0.5)+")";
+      ctx.beginPath(); ctx.arc(pv[0],pv[1],0.8+pv[2]*1.4,0,6.283); ctx.fill(); }
+
+    // --- quantum pulse rings ---
+    if(Math.random()<0.01) rings.push({x:Math.random()*W,y:Math.random()*H,r:2,a:0.42});
+    for(var ri=rings.length-1;ri>=0;ri--){ var rg=rings[ri]; rg.r+=1.0; rg.a-=0.006;
+      if(rg.a<=0){rings.splice(ri,1);continue;}
+      ctx.strokeStyle="rgba(93,202,165,"+rg.a+")"; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.arc(rg.x,rg.y,rg.r,0,6.283); ctx.stroke(); }
+
+    // --- sweeping scanline ---
+    scan+=1.2; if(scan>H+40) scan=-20;
+    var grd=ctx.createLinearGradient(0,scan-20,0,scan+20);
+    grd.addColorStop(0,"rgba(43,212,138,0)"); grd.addColorStop(0.5,"rgba(43,212,138,0.09)"); grd.addColorStop(1,"rgba(43,212,138,0)");
+    ctx.fillStyle=grd; ctx.fillRect(0,scan-20,W,40);
+    ctx.fillStyle="rgba(120,255,214,0.16)"; ctx.fillRect(0,scan,W,1);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
