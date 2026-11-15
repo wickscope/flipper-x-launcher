@@ -14,9 +14,18 @@ android {
         versionName "1.0"
     }
 
+    signingConfigs {
+        debug {
+            // Force BOTH signature schemes on: some locked carrier installers
+            // reject v2-only APKs and want the older v1 (JAR) signature too.
+            enableV1Signing true
+            enableV2Signing true
+        }
+    }
+
     buildTypes {
         debug {
-            // debug-signed; installs via sideload, no Play needed
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
