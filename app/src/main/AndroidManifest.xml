@@ -3,6 +3,11 @@
 
     <!-- No INTERNET permission: FLIPPER X runs fully offline, nothing leaves the device. -->
 
+    <!-- Read-only access to the on-card music library (no write, no network). -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
