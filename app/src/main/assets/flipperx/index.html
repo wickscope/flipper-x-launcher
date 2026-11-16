@@ -923,6 +923,7 @@ function updateIdle(){ var d=new Date();
   np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
 function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
+window.FXIDLE=function(){ try{ if(elBoot.classList.contains("hidden")) showIdle(); }catch(e){} };
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
 

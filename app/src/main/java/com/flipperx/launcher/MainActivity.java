@@ -2,6 +2,8 @@ package com.flipperx.launcher;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.KeyguardManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
@@ -71,9 +73,25 @@ public class MainActivity extends Activity {
 
         setContentView(web);
         // Let the screen sleep normally — do NOT keep it on (that cooked the phone).
+        // But draw FLIPPER X OVER the system keyguard so the stock lock/UI never flashes on wake.
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                            | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+        }
         hideSystemUI();
 
         requestReadIfNeeded();
+    }
+
+    private void dismissKeyguard() {
+        try {
+            KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            if (km != null && km.isKeyguardLocked()) km.requestDismissKeyguard(this, null);
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -87,10 +105,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        dismissKeyguard();   // clear the system swipe-lock so it never shows over FLIPPER X
+        hideSystemUI();
         if (web != null) {
             web.resumeTimers(); web.onResume();
             injectPlaylist();  // re-scan music when new tracks are added
-            web.evaluateJavascript("typeof fxSync==='function'&&fxSync();", null);
+            // Go straight to the shark cover screen on every wake / lid-open.
+            web.evaluateJavascript("window.FXIDLE&&FXIDLE();", null);
         }
     }
 
