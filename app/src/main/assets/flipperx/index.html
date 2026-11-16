@@ -76,6 +76,11 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .hint{font-size:10.5px;color:var(--muted);line-height:1.5}
 .np{font-size:11px;color:var(--accent2);min-height:15px;margin-bottom:7px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:rgba(11,22,18,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np:empty{display:none}
+/* keypad focus cursor — shows which control the nav keys act on */
+.row.focus,.tile.focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px var(--accent) inset!important;background:rgba(16,37,29,.92)!important}
+.btn.focus{border-color:var(--accent)!important;color:#e6fff6!important;background:#10241d!important;box-shadow:0 0 0 1px var(--accent)}
+input.inp.focus,input.focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px var(--accent) inset!important;color:#eafff6}
+.row.focus .pill.off{border-color:var(--accent2)}
 .note{font-size:10.5px;color:var(--warn);line-height:1.5;border-left:2px solid #4a3a17;padding-left:8px;margin:7px 0}
 
 /* terminal */
@@ -255,7 +260,7 @@ var LS={
 
 /* ---------- global state ---------- */
 var S={
-  view:"home", sel:0, playing:null, locked:true, pinBuf:"",
+  view:"home", sel:0, playing:null, _nav:[], _navIdx:0, locked:true, pinBuf:"",
   pin: LS.get("pin","0000"),
   radios: LS.get("radios",{cell:false,wifi:false,bt:false,gps:false}),
   sensors: LS.get("sensors",{mic:false,cam:false,motion:false,loc:false}),
@@ -291,11 +296,17 @@ FXAUD.addEventListener("error",function(){ if(V.music&&V.music._onerr)V.music._o
 FXAUD.addEventListener("playing",function(){ if(V.music&&V.music._np)V.music._np(); });
 FXAUD.addEventListener("pause",function(){ if(V.music&&V.music._np)V.music._np(); });
 
-/* tell the ambient animation when to run (idle/lock/boot/home only — paused inside modules) */
+/* start/stop the ambient animation per screen — it only runs on idle/lock/boot/home,
+   and is fully stopped (no CPU) inside modules and whenever the screen is off. */
 window.__fxAnim=function(){ try{
   return (!elBoot.classList.contains("hidden"))||(!elLock.classList.contains("hidden"))||
          (!elIdle.classList.contains("hidden"))||S.view==="home";
 }catch(e){ return true; } };
+function fxSync(){ try{
+  if(document.hidden){ if(window.__fxStop)window.__fxStop(); return; }
+  if(window.__fxAnim()){ if(window.__fxStart)window.__fxStart(); }
+  else { if(window.__fxStop)window.__fxStop(); }
+}catch(e){} }
 
 /* ---------- cobra mascot (digital brand character) ---------- */
 var COBRA='<svg viewBox="0 0 120 120" class="cobra-svg" xmlns="http://www.w3.org/2000/svg" aria-label="FLIPPER X shark">'+
@@ -396,7 +407,10 @@ V.shield={
       '<div class="card"><div class="big" style="color:'+(S.shield?'var(--accent)':'var(--warn)')+'">'+
       (S.shield?'PROTECTED':'EXPOSED')+'</div>'+
       '<div class="hint">Nothing leaves this device. No location, no sensors, no trackers. FLIPPER X makes '+
-      '<b style="color:var(--accent2)">0</b> outside connections unless you switch a radio on below.</div></div>'+
+      '<b style="color:var(--accent2)">0</b> outside connections unless you switch a radio on below.</div>'+
+      '<div class="row" data-tg="__shield"><span class="ri">'+(S.shield?'◉':'○')+'</span>'+
+      '<div class="rt"><div class="t1">Master shield</div></div>'+
+      '<span class="pill '+(S.shield?'on':'off')+'">'+(S.shield?'ON':'OFF')+'</span></div></div>'+
       '<div class="card"><h3>RADIOS</h3>'+
         tog("Cellular",r.cell)+tog("Wi-Fi",r.wifi)+tog("Bluetooth",r.bt)+tog("GPS / Location",r.gps,true)+'</div>'+
       '<div class="card"><h3>SENSORS &amp; TRACKING</h3>'+
@@ -409,6 +423,7 @@ V.shield={
   },
   onKey:function(k){ if(k==="Enter"||k==="*"){S.shield=!S.shield;persist();paintRadios();draw();} },
   click:function(t){var r=t.closest("[data-tg]");if(!r)return;var l=r.dataset.tg;
+    if(l==="__shield"){S.shield=!S.shield;persist();paintRadios();draw();return;}
     var map={"Cellular":["radios","cell"],"Wi-Fi":["radios","wifi"],"Bluetooth":["radios","bt"],"GPS / Location":["radios","gps"],
       "Microphone":["sensors","mic"],"Camera":["sensors","cam"],"Motion sensors":["sensors","motion"],"Location services":["sensors","loc"]};
     var m=map[l]; if(m){toggleRow(S[m[0]],m[1]);}}
@@ -766,22 +781,44 @@ function pyEval(src){
 
 /* ---------- router / render ---------- */
 V.plugins.keys={};
-function open(id){S.view=id;S.sel=0;draw();var v=V[id];if(v&&v.mounted)v.mounted();}
+function open(id){S.view=id;S.sel=0;S._navIdx=0;draw();var v=V[id];if(v&&v.mounted)v.mounted();}
 function home(){open("home");}
 function curV(){return V[S.view]||V.home;}
+function isGeneric(v){ return !v.noKeyRoute && v!==V.home && v!==V.music; }
 function draw(){
   var v=curV();
   elC.innerHTML=v.render();
-  // softkeys
-  elSkL.textContent=(S.view==="home")?"SETTINGS":"BACK";
+  // softkeys: left = context action, right = back/lock
+  var gen=isGeneric(v);
+  elSkL.textContent=(S.view==="home")?"SETTINGS":(v===V.music?"PLAY":(v.noKeyRoute?"":"SELECT"));
   elSkM.textContent=(S.view==="home")?"FLIPPER X":S.view.toUpperCase();
-  elSkR.textContent="LOCK";
+  elSkR.textContent=(S.view==="home")?"LOCK":"BACK";
   paintRadios();
   if(v.mounted&&S.view!=="home")v.mounted();
-  // click binding
+  buildNav();
+  fxSync();
+  // click binding (also used by keypad activate -> reuses the same handlers)
   elC.onclick=function(e){var v2=curV();
     if(v2.click)v2.click(e.target);
   };
+}
+
+/* ---------- universal keypad navigation (no touchscreen) ---------- */
+function buildNav(){
+  var v=curV();
+  if(!isGeneric(v)){ S._nav=[]; return; }
+  S._nav=[].slice.call(elC.querySelectorAll('[data-tg],[data-act],[data-del],input.inp'));
+  if(S._navIdx>=S._nav.length)S._navIdx=S._nav.length?S._nav.length-1:0;
+  markFocus();
+}
+function markFocus(){
+  for(var i=0;i<S._nav.length;i++)S._nav[i].classList.toggle("focus",i===S._navIdx);
+  var f=S._nav[S._navIdx]; if(f&&f.scrollIntoView)f.scrollIntoView({block:"nearest"});
+}
+function navMove(d){ if(!S._nav.length)return; S._navIdx=(S._navIdx+d+S._nav.length)%S._nav.length; markFocus(); }
+function navActivate(){ var f=S._nav[S._navIdx]; if(!f)return;
+  if(f.tagName==="INPUT"){ f.focus(); try{f.setSelectionRange(f.value.length,f.value.length);}catch(e){} return; }
+  var v=curV(); if(v.click)v.click(f);
 }
 
 /* ---------- global keys ---------- */
@@ -789,34 +826,64 @@ document.addEventListener("keydown",function(e){
   if(!elBoot.classList.contains("hidden"))return;
   if(!elIdle.classList.contains("hidden")){ elIdle.classList.add("hidden"); doLock(); e.preventDefault(); return; }
   if(!elLock.classList.contains("hidden")){ lockKey(e); return; }
-  var k=e.key;
-  // # closes the lid -> outer idle / cover screen
-  if(k==="#"){ showIdle(); e.preventDefault(); return; }
-  var v=curV();
-  if(v.noKeyRoute){ // terminal/python manage their own input; Esc handled there
+  var k=e.key, v=curV();
+
+  // editing a text field: let the keypad type into it; Esc / # finishes
+  var ae=document.activeElement;
+  if(ae && ae.tagName==="INPUT" && ae.closest && ae.closest("#content") && !v.noKeyRoute){
+    if(k==="Escape"||k==="#"){ ae.blur(); e.preventDefault(); }
     return;
   }
-  // feature-phone numeric navigation inside modules (digits are module shortcuts only on home)
+
+  if(k==="#"){ showIdle(); e.preventDefault(); return; }       // # = lid closed / cover
+  if(v.noKeyRoute){ return; }                                  // terminal/python own their keys
+
+  // feature-phone numeric nav inside modules (digits are shortcuts only on home)
   if(S.view!=="home"){
     if(k==="2")k="ArrowUp"; else if(k==="8")k="ArrowDown";
     else if(k==="4")k="ArrowLeft"; else if(k==="6")k="ArrowRight"; else if(k==="5")k="Enter";
   }
   if(k==="Backspace"||k==="Escape"){ if(S.view==="home"){ showIdle(); } else { home(); } e.preventDefault(); return; }
   if(k==="*" && S.view!=="home"){ open("shield"); e.preventDefault(); return; }
-  if((v.keys&&v.keys.left)&&(k==="F1")){ open(v.keys.left); return; }
-  if(v.onKey){ v.onKey(k); }
+
+  // universal nav for the generic modules (shield, network, comms, sensors, diag, database, settings, plugins)
+  if(isGeneric(v)){
+    if(k==="ArrowDown"||k==="ArrowRight"){ navMove(1); e.preventDefault(); return; }
+    if(k==="ArrowUp"||k==="ArrowLeft"){ navMove(-1); e.preventDefault(); return; }
+    if(k==="Enter"){ navActivate(); e.preventDefault(); return; }
+  }
+
+  if(v.onKey){ v.onKey(k); }                                   // home + music keep their own
   else if(k>="1"&&k<="9"&&S.view==="home"){ V.home.onKey(k); }
   if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Enter"].indexOf(k)>=0)e.preventDefault();
 });
 
-/* show the shark cover screen whenever the screen wakes / lid reopens */
+/* hardware soft keys (left/right line buttons) forwarded from the launcher */
+window.FXSOFT=function(side){
+  if(!elBoot.classList.contains("hidden"))return;
+  if(!elIdle.classList.contains("hidden")){ elIdle.classList.add("hidden"); doLock(); return; } // wake
+  if(!elLock.classList.contains("hidden")) return;
+  var ae=document.activeElement;
+  if(ae && ae.tagName==="INPUT" && ae.closest && ae.closest("#content")){ ae.blur(); if(side==="right")return; }
+  if(side==="right"){ if(S.view==="home"){ showIdle(); } else { home(); } return; }
+  // left soft = context action
+  if(S.view==="home"){ open("settings"); return; }
+  var v=curV();
+  if(v===V.music){ V.music.play(S.sel); return; }
+  if(v.noKeyRoute){ home(); return; }
+  navActivate();
+};
+
+/* screen off -> stop all animation; screen on / lid reopen -> show the shark cover screen */
 document.addEventListener("visibilitychange",function(){
-  if(!document.hidden && elBoot.classList.contains("hidden") && elIdle.classList.contains("hidden")){ showIdle(); }
+  if(document.hidden){ fxSync(); return; }
+  if(elBoot.classList.contains("hidden") && elIdle.classList.contains("hidden")){ showIdle(); }
+  fxSync();
 });
 
-/* softkey clicks */
-elSkL.onclick=function(){ if(S.view==="home")open("settings"); else home(); };
-elSkR.onclick=function(){ showIdle(); };
+/* softkey clicks (and keyboard forwarder targets) */
+elSkL.onclick=function(){ FXSOFT("left"); };
+elSkR.onclick=function(){ FXSOFT("right"); };
 elSkM.onclick=function(){ home(); };
 
 /* ---------- lock ---------- */
@@ -835,7 +902,7 @@ function checkPin(){
 }
 function chrome(on){var s=document.getElementById("statusbar"),k=document.getElementById("softkeys");if(s)s.style.display=on?"":"none";if(k)k.style.display=on?"":"none";}
 chrome(false);
-function doLock(){ S.locked=true; S.pinBuf=""; paintPin(); elIdle.classList.add("hidden"); elLock.classList.remove("hidden"); chrome(false); }
+function doLock(){ S.locked=true; S.pinBuf=""; paintPin(); elIdle.classList.add("hidden"); elLock.classList.remove("hidden"); chrome(false); fxSync(); }
 function updateIdle(){ var d=new Date();
   var days=["SUN","MON","TUE","WED","THU","FRI","SAT"],mon=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   document.getElementById("idle-clock").textContent=two(d.getHours())+":"+two(d.getMinutes());
@@ -846,7 +913,7 @@ function updateIdle(){ var d=new Date();
   var np=document.getElementById("idle-np"),tr=(S.playing!=null)?S.playlist[S.playing]:null;
   np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
-function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); }
+function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxSync(); }
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
 
@@ -906,12 +973,12 @@ window.FLIPPERX={
     return [CX+x*k*scale, CY+y*k*scale, (p[3]+2)/4];
   }
 
-  var ang=0,last=0,FRAME=60,scan=0;
+  var ang=0,last=0,FRAME=80,scan=0,fxRunning=false,fxId=null;
   function loop(t){
-    requestAnimationFrame(loop);
+    if(!fxRunning){ fxId=null; return; }                   // truly stopped -> zero CPU
+    fxId=requestAnimationFrame(loop);
     if(t-last<FRAME) return;
-    if(document.hidden){ last=t; return; }                 // screen off -> no work
-    if(window.__fxAnim && !window.__fxAnim()){ last=t; return; } // inside a module -> paused
+    if(document.hidden){ return; }                         // screen off -> no draw
     last=t;
     ctx.fillStyle="rgba(6,13,11,0.30)"; ctx.fillRect(0,0,W,H); // depth trails
 
@@ -933,7 +1000,9 @@ window.FLIPPERX={
     scan+=1.1; if(scan>H+30) scan=-18;
     ctx.fillStyle="rgba(43,212,138,0.06)"; ctx.fillRect(0,scan-12,W,24);
   }
-  requestAnimationFrame(loop);
+  window.__fxStart=function(){ if(!fxRunning){ fxRunning=true; last=0; if(!fxId)fxId=requestAnimationFrame(loop); } };
+  window.__fxStop=function(){ fxRunning=false; if(fxId){ cancelAnimationFrame(fxId); fxId=null; } };
+  window.__fxStart();
 })();
 </script>
 </body>
