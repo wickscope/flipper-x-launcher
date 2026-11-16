@@ -302,11 +302,18 @@ window.__fxAnim=function(){ try{
   return (!elBoot.classList.contains("hidden"))||(!elLock.classList.contains("hidden"))||
          (!elIdle.classList.contains("hidden"))||S.view==="home";
 }catch(e){ return true; } };
+var fxFrozen=false, fxIdleT=null;
 function fxSync(){ try{
-  if(document.hidden){ if(window.__fxStop)window.__fxStop(); return; }
+  if(document.hidden||fxFrozen){ if(window.__fxStop)window.__fxStop(); return; }
   if(window.__fxAnim()){ if(window.__fxStart)window.__fxStart(); }
   else { if(window.__fxStop)window.__fxStop(); }
 }catch(e){} }
+/* activity wakes the motion; after 20s idle it freezes to save heat, and any key springs it back */
+function fxWake(){
+  fxFrozen=false; fxSync();
+  if(fxIdleT)clearTimeout(fxIdleT);
+  fxIdleT=setTimeout(function(){ fxFrozen=true; if(window.__fxStop)window.__fxStop(); },20000);
+}
 
 /* ---------- cobra mascot (digital brand character) ---------- */
 var COBRA='<svg viewBox="0 0 120 120" class="cobra-svg" xmlns="http://www.w3.org/2000/svg" aria-label="FLIPPER X shark">'+
@@ -824,6 +831,7 @@ function navActivate(){ var f=S._nav[S._navIdx]; if(!f)return;
 /* ---------- global keys ---------- */
 document.addEventListener("keydown",function(e){
   if(!elBoot.classList.contains("hidden"))return;
+  fxWake();   // any key = activity: resume motion and restart the idle-freeze timer
   if(!elIdle.classList.contains("hidden")){ elIdle.classList.add("hidden"); doLock(); e.preventDefault(); return; }
   if(!elLock.classList.contains("hidden")){ lockKey(e); return; }
   var k=e.key, v=curV();
@@ -861,6 +869,7 @@ document.addEventListener("keydown",function(e){
 /* hardware soft keys (left/right line buttons) forwarded from the launcher */
 window.FXSOFT=function(side){
   if(!elBoot.classList.contains("hidden"))return;
+  fxWake();
   if(!elIdle.classList.contains("hidden")){ elIdle.classList.add("hidden"); doLock(); return; } // wake
   if(!elLock.classList.contains("hidden")) return;
   var ae=document.activeElement;
@@ -913,7 +922,7 @@ function updateIdle(){ var d=new Date();
   var np=document.getElementById("idle-np"),tr=(S.playing!=null)?S.playlist[S.playing]:null;
   np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
-function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxSync(); }
+function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
 
