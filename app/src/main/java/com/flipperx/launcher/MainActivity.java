@@ -70,10 +70,28 @@ public class MainActivity extends Activity {
         web.loadUrl("file:///android_asset/flipperx/index.html");
 
         setContentView(web);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // Let the screen sleep normally — do NOT keep it on (that cooked the phone).
         hideSystemUI();
 
         requestReadIfNeeded();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // Lid closed / screen off / backgrounded: halt ALL WebView work (JS, rAF, timers,
+        // media decode) so the phone stops heating up while idle or closed.
+        if (web != null) { web.onPause(); web.pauseTimers(); }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (web != null) {
+            web.resumeTimers(); web.onResume();
+            injectPlaylist();  // re-scan music when new tracks are added
+            web.evaluateJavascript("typeof fxSync==='function'&&fxSync();", null);
+        }
     }
 
     private void requestReadIfNeeded() {
@@ -89,12 +107,6 @@ public class MainActivity extends Activity {
     public void onRequestPermissionsResult(int req, String[] p, int[] r) {
         super.onRequestPermissionsResult(req, p, r);
         if (req == REQ_READ) injectPlaylist();
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (web != null) injectPlaylist();  // re-scan when new tracks are added
     }
 
     /** Scan every Music folder we can reach and hand the list to the web layer. */
@@ -180,12 +192,20 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            web.evaluateJavascript(
-                    "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Backspace',bubbles:true}));", null);
-            return true;
+        switch (keyCode) {
+            // right soft key / back / clear -> context back
+            case KeyEvent.KEYCODE_BACK:
+            case KeyEvent.KEYCODE_SOFT_RIGHT:
+                web.evaluateJavascript("window.FXSOFT&&FXSOFT('right');", null);
+                return true;
+            // left soft key / menu -> context select / options
+            case KeyEvent.KEYCODE_SOFT_LEFT:
+            case KeyEvent.KEYCODE_MENU:
+                web.evaluateJavascript("window.FXSOFT&&FXSOFT('left');", null);
+                return true;
+            default:
+                return super.onKeyDown(keyCode, event);
         }
-        return super.onKeyDown(keyCode, event);
     }
 
     @Override
