@@ -284,7 +284,7 @@ var elC=document.getElementById("content"),
     elSkL=document.getElementById("sk-left"), elSkM=document.getElementById("sk-mid"), elSkR=document.getElementById("sk-right");
 
 /* persistent audio element — lives outside #content so re-renders never kill playback */
-var FXAUD=document.createElement("audio"); FXAUD.id="fxaud"; FXAUD.preload="none";
+var FXAUD=document.createElement("audio"); FXAUD.id="fxaud"; FXAUD.preload="auto";
 document.getElementById("device").appendChild(FXAUD);
 FXAUD.addEventListener("ended",function(){ if(V.music&&V.music._next)V.music._next(); });
 FXAUD.addEventListener("error",function(){ if(V.music&&V.music._onerr)V.music._onerr(); });
@@ -656,13 +656,21 @@ V.music={
       '<div class="card" style="padding:6px"><h3 style="padding:0 5px">LIBRARY · 1corpse · '+S.playlist.length+'</h3>'+list+'</div>'+
       '<div class="hint" style="margin-top:6px">▲▼ or 2 / 8 browse · OK or 5 play/pause · ◀ back</div>';
   },
-  mounted:function(){ this._np(); this._scroll(); },
+  _loaded:null, _pt:null,
+  mounted:function(){ this._np(); this._scroll(); this._schedPre(); },
   _scroll:function(){ var el=elC.querySelector('.row[data-i="'+S.sel+'"]'); if(el&&el.scrollIntoView)el.scrollIntoView({block:"nearest"}); },
   _sel:function(ni){ if(!S.playlist.length)return;
     ni=Math.max(0,Math.min(S.playlist.length-1,ni));
     var cur=elC.querySelector('.row.sel'); if(cur)cur.classList.remove("sel");
     S.sel=ni; var el=elC.querySelector('.row[data-i="'+ni+'"]');
-    if(el){ el.classList.add("sel"); if(el.scrollIntoView)el.scrollIntoView({block:"nearest"}); } },
+    if(el){ el.classList.add("sel"); if(el.scrollIntoView)el.scrollIntoView({block:"nearest"}); }
+    this._schedPre(); },
+  _schedPre:function(){ var self=this; if(self._pt)clearTimeout(self._pt);
+    self._pt=setTimeout(function(){ self._pre(); },350); },
+  _pre:function(){ // preload the highlighted track while idle so play() starts instantly
+    if(!S.playlist.length||!FXAUD.paused||this._loaded===S.sel)return;
+    var tr=S.playlist[S.sel]; if(!tr||!tr.src)return;
+    try{ FXAUD.src=tr.src; FXAUD.load(); this._loaded=S.sel; }catch(e){} },
   onKey:function(k){
     if(!S.playlist.length)return;
     if(k==="ArrowDown"){this._sel(S.sel+1);}
@@ -674,8 +682,10 @@ V.music={
   click:function(t){var r=t.closest("[data-i]");if(r)this.play(+r.dataset.i);},
   play:function(i){ var tr=S.playlist[i]; if(!tr||!tr.src)return;
     var prev=S.playing; S.playing=i;
-    try{ FXAUD.src=tr.src; var p=FXAUD.play(); if(p&&p.catch)p.catch(function(){V.music._onerr();}); }
-    catch(e){ this._onerr(); }
+    try{
+      if(this._loaded!==i){ FXAUD.src=tr.src; this._loaded=i; }   // already preloaded? -> instant
+      var p=FXAUD.play(); if(p&&p.catch)p.catch(function(){V.music._onerr();});
+    }catch(e){ this._onerr(); }
     if(S.view==="music"){ this._mark(prev,i); this._np(); } },
   _mark:function(prev,cur){ // update the ▶ icon in-place without a full re-render
     var a=(prev!=null)?elC.querySelector('.row[data-i="'+prev+'"] .ri'):null; if(a)a.textContent="♪";
