@@ -143,6 +143,51 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .gi{animation:rise 2.8s ease-in-out infinite alternate}
 .shieldmark{animation:glow 2.4s ease-in-out infinite,flicker 6s linear infinite}
 .big{animation:glow 3.4s ease-in-out infinite}
+
+/* ===== Summit Flip small-screen fit (240x320 physical / ~272x363 css) ===== */
+@media (max-width:360px){
+  #device{max-width:none;border:none}
+  #statusbar{padding:4px 7px;font-size:8.5px}
+  #statusbar .l,#statusbar .r{gap:5px}
+  #clock{font-size:9px}
+  #content{padding:8px}
+  .vhead{margin:0 0 7px;padding-bottom:5px}
+  .vhead h1{font-size:13px;letter-spacing:.5px}
+  .vhead .ico{font-size:15px}
+  .vhead .tag{font-size:8.5px;letter-spacing:1px}
+  .grid{gap:6px}
+  .tile{min-height:52px;padding:7px 3px;gap:3px}
+  .tile .gi{font-size:17px}
+  .tile .nm{font-size:9.5px}
+  .tile .num{font-size:8px;top:3px;left:5px}
+  .row{padding:7px;gap:7px;margin-bottom:5px}
+  .row .ri{font-size:14px;width:18px}
+  .row .rt .t1{font-size:11.5px}
+  .row .rt .t2{font-size:9px}
+  .row .rv{font-size:10px}
+  .card{padding:8px;margin-bottom:7px}
+  .card h3{font-size:9.5px}
+  .kv{font-size:10.5px}
+  .big{font-size:19px}
+  .hint,.note{font-size:9px;line-height:1.4}
+  #term,.prompt .ps,.prompt input{font-size:10.5px}
+  .btn{font-size:10.5px;padding:6px 9px}
+  #softkeys{padding:6px 8px;font-size:9.5px}
+  .cobra-svg{width:50px;height:52px}
+  .overlay{padding:12px;gap:9px}
+  .brandbig{font-size:21px;letter-spacing:3px}
+  .brandsub{font-size:8px;letter-spacing:2px}
+  .bootlog{font-size:8.5px;min-height:70px}
+  .shieldmark{font-size:30px}
+  #idle{padding:8px}
+  #idle-sec{top:7px!important;font-size:8.5px!important;letter-spacing:1px!important}
+  #cobra-quip{margin:0 0 3px!important;font-size:9px!important;min-height:11px!important}
+  #idle-clock{font-size:40px!important;letter-spacing:1px!important}
+  #idle-date{font-size:10px!important;letter-spacing:2px!important;margin-top:2px!important}
+  #idle-radios{margin-top:12px!important;gap:10px!important;font-size:9px!important}
+  #idle-np{margin-top:10px!important;font-size:9px!important;min-height:11px!important}
+  #idle > div:last-child{bottom:8px!important;font-size:8.5px!important;letter-spacing:1px!important}
+}
 </style>
 </head>
 <body>
@@ -725,11 +770,13 @@ function lockKey(e){
   if(k==="#"||k==="Backspace"||k==="Escape"){ S.pinBuf=""; paintPin(); e.preventDefault(); }
 }
 function checkPin(){
-  if(S.pinBuf===S.pin){ S.locked=false; elLock.classList.add("hidden"); S.pinBuf=""; home(); }
+  if(S.pinBuf===S.pin){ S.locked=false; elLock.classList.add("hidden"); S.pinBuf=""; chrome(true); home(); }
   else { lockMsg.textContent="wrong code"; lockMsg.style.color="var(--danger)"; S.pinBuf=""; paintPin();
     setTimeout(function(){lockMsg.textContent="keypad 0–9 · # clear";lockMsg.style.color="var(--muted)";},1200); }
 }
-function doLock(){ S.locked=true; S.pinBuf=""; paintPin(); elIdle.classList.add("hidden"); elLock.classList.remove("hidden"); }
+function chrome(on){var s=document.getElementById("statusbar"),k=document.getElementById("softkeys");if(s)s.style.display=on?"":"none";if(k)k.style.display=on?"":"none";}
+chrome(false);
+function doLock(){ S.locked=true; S.pinBuf=""; paintPin(); elIdle.classList.add("hidden"); elLock.classList.remove("hidden"); chrome(false); }
 function updateIdle(){ var d=new Date();
   var days=["SUN","MON","TUE","WED","THU","FRI","SAT"],mon=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   document.getElementById("idle-clock").textContent=two(d.getHours())+":"+two(d.getMinutes());
@@ -740,7 +787,7 @@ function updateIdle(){ var d=new Date();
   var np=document.getElementById("idle-np"),au=document.getElementById("aud");
   np.textContent=(au&&!au.paused&&S.playlist.length&&S.playlist[S.sel])?("♪ "+(S.playlist[S.sel].title||"")):"";
 }
-function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); }
+function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); }
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
 
