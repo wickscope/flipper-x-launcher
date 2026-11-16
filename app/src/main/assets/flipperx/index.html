@@ -74,6 +74,8 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .kv span:last-child{color:var(--text)}
 .big{font-size:26px;color:#e6fff6;font-weight:600}
 .hint{font-size:10.5px;color:var(--muted);line-height:1.5}
+.np{font-size:11px;color:var(--accent2);min-height:15px;margin-bottom:7px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:rgba(11,22,18,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np:empty{display:none}
 .note{font-size:10.5px;color:var(--warn);line-height:1.5;border-left:2px solid #4a3a17;padding-left:8px;margin:7px 0}
 
 /* terminal */
@@ -253,7 +255,7 @@ var LS={
 
 /* ---------- global state ---------- */
 var S={
-  view:"home", sel:0, locked:true, pinBuf:"",
+  view:"home", sel:0, playing:null, locked:true, pinBuf:"",
   pin: LS.get("pin","0000"),
   radios: LS.get("radios",{cell:false,wifi:false,bt:false,gps:false}),
   sensors: LS.get("sensors",{mic:false,cam:false,motion:false,loc:false}),
@@ -280,6 +282,20 @@ function persist(){LS.set("pin",S.pin);LS.set("radios",S.radios);LS.set("sensors
 var elC=document.getElementById("content"),
     elBoot=document.getElementById("boot"), elLock=document.getElementById("lock"), elIdle=document.getElementById("idle"),
     elSkL=document.getElementById("sk-left"), elSkM=document.getElementById("sk-mid"), elSkR=document.getElementById("sk-right");
+
+/* persistent audio element — lives outside #content so re-renders never kill playback */
+var FXAUD=document.createElement("audio"); FXAUD.id="fxaud"; FXAUD.preload="none";
+document.getElementById("device").appendChild(FXAUD);
+FXAUD.addEventListener("ended",function(){ if(V.music&&V.music._next)V.music._next(); });
+FXAUD.addEventListener("error",function(){ if(V.music&&V.music._onerr)V.music._onerr(); });
+FXAUD.addEventListener("playing",function(){ if(V.music&&V.music._np)V.music._np(); });
+FXAUD.addEventListener("pause",function(){ if(V.music&&V.music._np)V.music._np(); });
+
+/* tell the ambient animation when to run (idle/lock/boot/home only — paused inside modules) */
+window.__fxAnim=function(){ try{
+  return (!elBoot.classList.contains("hidden"))||(!elLock.classList.contains("hidden"))||
+         (!elIdle.classList.contains("hidden"))||S.view==="home";
+}catch(e){ return true; } };
 
 /* ---------- cobra mascot (digital brand character) ---------- */
 var COBRA='<svg viewBox="0 0 120 120" class="cobra-svg" xmlns="http://www.w3.org/2000/svg" aria-label="FLIPPER X shark">'+
@@ -626,27 +642,50 @@ V.files={
 
 V.music={
   render:function(){
-    var list=S.playlist.length? S.playlist.map(function(tr,i){
-        return '<div class="row'+(i===S.sel?' sel':'')+'" data-i="'+i+'"><span class="ri">♪</span>'+
+    if(!S.playlist.length)
+      return head("MUSIC","♪","OFFLINE PLAYER")+
+        '<div class="card"><div class="hint">No tracks yet. Your SoundCloud likes live in the card\'s '+
+        '<b style="color:var(--accent2)">Music</b> folder and appear here automatically. Fully offline.</div></div>';
+    var list=S.playlist.map(function(tr,i){
+      return '<div class="row'+(i===S.sel?' sel':'')+'" data-i="'+i+'"><span class="ri">'+
+        (i===S.playing?'▶':'♪')+'</span>'+
         '<div class="rt"><div class="t1">'+esc(tr.title)+'</div><div class="t2">'+esc(tr.artist||"")+'</div></div>'+
-        '<span class="rv">▶</span></div>';}).join("")
-      : '<div class="hint">No tracks yet. Your SoundCloud likes get copied to <b style="color:var(--accent2)">/sdcard/Music</b> '+
-        'on the card, then appear here automatically. Fully offline playback.</div>';
+        '</div>';}).join("");
     return head("MUSIC","♪","OFFLINE PLAYER")+
-      '<div class="card"><h3>LIBRARY · 1corpse likes</h3>'+list+'</div>'+
-      '<audio id="aud" style="width:100%;margin-top:6px" controls></audio>'+
-      '<div class="hint" style="margin-top:8px">Scans the card\'s Music folder on launch. Supports mp3 / m4a / flac '+
-      '/ wav / ogg — whatever the stock player reads.</div>';
+      '<div id="np" class="np"></div>'+
+      '<div class="card" style="padding:6px"><h3 style="padding:0 5px">LIBRARY · 1corpse · '+S.playlist.length+'</h3>'+list+'</div>'+
+      '<div class="hint" style="margin-top:6px">▲▼ or 2 / 8 browse · OK or 5 play/pause · ◀ back</div>';
   },
+  mounted:function(){ this._np(); this._scroll(); },
+  _scroll:function(){ var el=elC.querySelector('.row[data-i="'+S.sel+'"]'); if(el&&el.scrollIntoView)el.scrollIntoView({block:"nearest"}); },
+  _sel:function(ni){ if(!S.playlist.length)return;
+    ni=Math.max(0,Math.min(S.playlist.length-1,ni));
+    var cur=elC.querySelector('.row.sel'); if(cur)cur.classList.remove("sel");
+    S.sel=ni; var el=elC.querySelector('.row[data-i="'+ni+'"]');
+    if(el){ el.classList.add("sel"); if(el.scrollIntoView)el.scrollIntoView({block:"nearest"}); } },
   onKey:function(k){
     if(!S.playlist.length)return;
-    if(k==="ArrowDown"){S.sel=Math.min(S.playlist.length-1,S.sel+1);draw();}
-    if(k==="ArrowUp"){S.sel=Math.max(0,S.sel-1);draw();}
-    if(k==="Enter"){this.play(S.sel);}
+    if(k==="ArrowDown"){this._sel(S.sel+1);}
+    else if(k==="ArrowUp"){this._sel(S.sel-1);}
+    else if(k==="ArrowRight"){this._sel(S.sel+8);}
+    else if(k==="ArrowLeft"){this._sel(S.sel-8);}
+    else if(k==="Enter"){ if(S.playing===S.sel && !FXAUD.paused){ FXAUD.pause(); } else { this.play(S.sel); } }
   },
   click:function(t){var r=t.closest("[data-i]");if(r)this.play(+r.dataset.i);},
-  play:function(i){var tr=S.playlist[i];if(!tr)return;var a=document.getElementById("aud");
-    if(a&&tr.src){a.src=tr.src;a.play().catch(function(){});}}
+  play:function(i){ var tr=S.playlist[i]; if(!tr||!tr.src)return;
+    var prev=S.playing; S.playing=i;
+    try{ FXAUD.src=tr.src; var p=FXAUD.play(); if(p&&p.catch)p.catch(function(){V.music._onerr();}); }
+    catch(e){ this._onerr(); }
+    if(S.view==="music"){ this._mark(prev,i); this._np(); } },
+  _mark:function(prev,cur){ // update the ▶ icon in-place without a full re-render
+    var a=(prev!=null)?elC.querySelector('.row[data-i="'+prev+'"] .ri'):null; if(a)a.textContent="♪";
+    var b=elC.querySelector('.row[data-i="'+cur+'"] .ri'); if(b)b.textContent="▶"; },
+  _next:function(){ if(S.playing==null)return; var n=S.playing+1;
+    if(n<S.playlist.length){ if(S.view==="music")this.play(n); else { var t=S.playlist[n]; S.playing=n; try{FXAUD.src=t.src;FXAUD.play();}catch(e){} } } },
+  _onerr:function(){ var n=document.getElementById("np"); if(n)n.textContent="⚠ skipping unreadable track"; this._next(); },
+  _np:function(){ var n=document.getElementById("np"); if(!n)return;
+    var tr=(S.playing!=null)?S.playlist[S.playing]:null;
+    n.textContent=tr?((FXAUD.paused?"⏸ ":"♪ ")+tr.title):""; }
 };
 
 V.plugins={
@@ -747,12 +786,22 @@ document.addEventListener("keydown",function(e){
   if(v.noKeyRoute){ // terminal/python manage their own input; Esc handled there
     return;
   }
-  if(k==="Backspace"||k==="Escape"){ if(S.view==="home"){} else { home(); } e.preventDefault(); return; }
+  // feature-phone numeric navigation inside modules (digits are module shortcuts only on home)
+  if(S.view!=="home"){
+    if(k==="2")k="ArrowUp"; else if(k==="8")k="ArrowDown";
+    else if(k==="4")k="ArrowLeft"; else if(k==="6")k="ArrowRight"; else if(k==="5")k="Enter";
+  }
+  if(k==="Backspace"||k==="Escape"){ if(S.view==="home"){ showIdle(); } else { home(); } e.preventDefault(); return; }
   if(k==="*" && S.view!=="home"){ open("shield"); e.preventDefault(); return; }
   if((v.keys&&v.keys.left)&&(k==="F1")){ open(v.keys.left); return; }
   if(v.onKey){ v.onKey(k); }
   else if(k>="1"&&k<="9"&&S.view==="home"){ V.home.onKey(k); }
   if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Enter"].indexOf(k)>=0)e.preventDefault();
+});
+
+/* show the shark cover screen whenever the screen wakes / lid reopens */
+document.addEventListener("visibilitychange",function(){
+  if(!document.hidden && elBoot.classList.contains("hidden") && elIdle.classList.contains("hidden")){ showIdle(); }
 });
 
 /* softkey clicks */
@@ -784,8 +833,8 @@ function updateIdle(){ var d=new Date();
   document.getElementById("idle-sec").textContent=(S.shield&&!S.sensors.loc)?"⬡ SECURE · 0 TRACKERS":"⬡ SHIELD OFF";
   var rids=document.querySelectorAll("#idle-radios span"),rk=[S.radios.cell,S.radios.wifi,S.radios.bt,S.radios.gps];
   for(var i=0;i<rids.length;i++){ rids[i].className=rk[i]?"":"radio-off"; }
-  var np=document.getElementById("idle-np"),au=document.getElementById("aud");
-  np.textContent=(au&&!au.paused&&S.playlist.length&&S.playlist[S.sel])?("♪ "+(S.playlist[S.sel].title||"")):"";
+  var np=document.getElementById("idle-np"),tr=(S.playing!=null)?S.playlist[S.playing]:null;
+  np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
 function showIdle(){ S.locked=true; S.pinBuf=""; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); }
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
@@ -819,12 +868,12 @@ window.FLIPPERX={
 /* ---------- 4D ambient field: perspective starfield + rotating tesseract ---------- */
 (function(){
   var cv=document.getElementById("qfx"), ctx=cv.getContext("2d"), dev=document.getElementById("device");
-  var W=0,H=0,CX=0,CY=0,DPR=Math.min(window.devicePixelRatio||1,1.5);
+  var W=0,H=0,CX=0,CY=0,DPR=1;
   function size(){ var r=dev.getBoundingClientRect(); W=r.width;H=r.height;CX=W/2;CY=H/2;
     cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+"px";cv.style.height=H+"px";ctx.setTransform(DPR,0,0,DPR,0,0); }
 
-  // 3D starfield flying toward the camera
-  var STARS=[], NS=48;
+  // 3D starfield flying toward the camera (lightweight for the MT6739)
+  var STARS=[], NS=14;
   function reseed(s){ s.x=(Math.random()*2-1)*CX*0.9; s.y=(Math.random()*2-1)*CY*0.9;
     s.z=Math.random()*1.3+0.25; s.ph=Math.random()*6.28; }
   function seed(){ STARS=[]; for(var i=0;i<NS;i++){ var s={}; reseed(s); STARS.push(s); } }
@@ -847,50 +896,32 @@ window.FLIPPERX={
     return [CX+x*k*scale, CY+y*k*scale, (p[3]+2)/4];
   }
 
-  var ang=0,last=0,FRAME=33,scan=0,rings=[];
+  var ang=0,last=0,FRAME=60,scan=0;
   function loop(t){
     requestAnimationFrame(loop);
-    if(t-last<FRAME) return; last=t;
-    ctx.fillStyle="rgba(6,13,11,0.26)"; ctx.fillRect(0,0,W,H); // depth trails
+    if(t-last<FRAME) return;
+    if(document.hidden){ last=t; return; }                 // screen off -> no work
+    if(window.__fxAnim && !window.__fxAnim()){ last=t; return; } // inside a module -> paused
+    last=t;
+    ctx.fillStyle="rgba(6,13,11,0.30)"; ctx.fillRect(0,0,W,H); // depth trails
 
-    // --- starfield ---
-    var proj=[];
-    for(i=0;i<STARS.length;i++){ var st=STARS[i]; st.z-=0.006; st.ph+=0.05;
+    // --- light starfield: cheap squares, no O(n^2) links ---
+    for(i=0;i<STARS.length;i++){ var st=STARS[i]; st.z-=0.006;
       if(st.z<0.14){ reseed(st); st.z=1.55; }
-      var sx=CX+st.x/st.z, sy=CY+st.y/st.z;
-      var r=Math.min(3,0.7/st.z), a=Math.max(0,Math.min(1,1.5-st.z)), fl=0.6+0.4*Math.sin(st.ph);
-      proj.push({x:sx,y:sy});
-      ctx.fillStyle="rgba(43,212,138,"+(a*0.42)+")"; ctx.beginPath(); ctx.arc(sx,sy,r,0,6.283); ctx.fill();
-      ctx.fillStyle="rgba(150,255,220,"+(a*fl)+")"; ctx.beginPath(); ctx.arc(sx,sy,r*0.45,0,6.283); ctx.fill();
-    }
-    for(i=0;i<proj.length;i++){ for(var j2=i+1;j2<proj.length;j2++){
-      var dx=proj[i].x-proj[j2].x, dy=proj[i].y-proj[j2].y, dd=dx*dx+dy*dy;
-      if(dd<5000){ ctx.strokeStyle="rgba(93,202,165,"+(0.11*(1-dd/5000))+")"; ctx.lineWidth=.5;
-        ctx.beginPath(); ctx.moveTo(proj[i].x,proj[i].y); ctx.lineTo(proj[j2].x,proj[j2].y); ctx.stroke(); } } }
+      var sx=CX+st.x/st.z, sy=CY+st.y/st.z, r=Math.min(2.4,0.7/st.z), a=Math.max(0,Math.min(1,1.5-st.z));
+      ctx.fillStyle="rgba(120,255,214,"+(a*0.5)+")"; ctx.fillRect(sx-r*0.5,sy-r*0.5,r,r); }
 
-    // --- rotating tesseract (4D) ---
+    // --- rotating tesseract (4D) — the signature motion ---
     ang+=0.006;
     var scale=Math.min(W,H)*0.16, pts=[];
     for(i=0;i<16;i++){ pts.push(project4(rot(V4[i],ang),scale)); }
     for(var e=0;e<EDG.length;e++){ var p=pts[EDG[e][0]], q=pts[EDG[e][1]], depth=(p[2]+q[2])/2;
-      ctx.strokeStyle="rgba(93,202,165,"+(0.08+depth*0.26)+")"; ctx.lineWidth=0.4+depth*1.1;
+      ctx.strokeStyle="rgba(93,202,165,"+(0.08+depth*0.26)+")"; ctx.lineWidth=0.5+depth*0.9;
       ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); ctx.stroke(); }
-    for(i=0;i<16;i++){ var pv=pts[i]; ctx.fillStyle="rgba(120,255,214,"+(0.18+pv[2]*0.5)+")";
-      ctx.beginPath(); ctx.arc(pv[0],pv[1],0.8+pv[2]*1.4,0,6.283); ctx.fill(); }
 
-    // --- quantum pulse rings ---
-    if(Math.random()<0.01) rings.push({x:Math.random()*W,y:Math.random()*H,r:2,a:0.42});
-    for(var ri=rings.length-1;ri>=0;ri--){ var rg=rings[ri]; rg.r+=1.0; rg.a-=0.006;
-      if(rg.a<=0){rings.splice(ri,1);continue;}
-      ctx.strokeStyle="rgba(93,202,165,"+rg.a+")"; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.arc(rg.x,rg.y,rg.r,0,6.283); ctx.stroke(); }
-
-    // --- sweeping scanline ---
-    scan+=1.2; if(scan>H+40) scan=-20;
-    var grd=ctx.createLinearGradient(0,scan-20,0,scan+20);
-    grd.addColorStop(0,"rgba(43,212,138,0)"); grd.addColorStop(0.5,"rgba(43,212,138,0.09)"); grd.addColorStop(1,"rgba(43,212,138,0)");
-    ctx.fillStyle=grd; ctx.fillRect(0,scan-20,W,40);
-    ctx.fillStyle="rgba(120,255,214,0.16)"; ctx.fillRect(0,scan,W,1);
+    // --- single flat scanline ---
+    scan+=1.1; if(scan>H+30) scan=-18;
+    ctx.fillStyle="rgba(43,212,138,0.06)"; ctx.fillRect(0,scan-12,W,24);
   }
   requestAnimationFrame(loop);
 })();
