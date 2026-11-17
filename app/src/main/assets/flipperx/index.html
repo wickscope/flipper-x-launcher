@@ -77,6 +77,8 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .np{font-size:11px;color:var(--accent2);min-height:15px;margin-bottom:7px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:rgba(11,22,18,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np:empty{display:none}
 /* keypad focus cursor — shows which control the nav keys act on */
+/* long music list: let the engine skip offscreen rows so 500+ tracks don't freeze the phone */
+.row[data-i]{content-visibility:auto;contain-intrinsic-size:0 46px}
 .row.focus,.tile.focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px var(--accent) inset!important;background:rgba(16,37,29,.92)!important}
 .btn.focus{border-color:var(--accent)!important;color:#e6fff6!important;background:#10241d!important;box-shadow:0 0 0 1px var(--accent)}
 input.inp.focus,input.focus{border-color:var(--accent)!important;box-shadow:0 0 0 2px var(--accent) inset!important;color:#eafff6}
@@ -356,7 +358,7 @@ function paintRadios(){
 var MODS=[
   {id:"shield", nm:"Shield",   ic:"⬡"},
   {id:"terminal",nm:"Terminal", ic:"▮"},
-  {id:"python", nm:"Python",   ic:"λ"},
+  {id:"toolkit",nm:"Toolkit",  ic:"⚒"},
   {id:"network", nm:"Network",  ic:"≋"},
   {id:"comms",  nm:"Comms",    ic:"✉"},
   {id:"sensors", nm:"Sensors",  ic:"◉"},
@@ -461,9 +463,8 @@ var TERM={
       case"radios": p("cell:"+(S.radios.cell?"on":"off")+"  wifi:"+(S.radios.wifi?"on":"off")+"  bt:"+(S.radios.bt?"on":"off")+"  gps:"+(S.radios.gps?"on":"off")); break;
       case"net": p("interfaces:");p(" wlan0  "+(S.radios.wifi?"UP (bridge)":"DOWN"));p(" bt0    "+(S.radios.bt?"UP (bridge)":"DOWN"));
         p("online: "+(navigator.onLine?"yes":"no"),"sys"); break;
-      case"scan": if(!S.radios.wifi&&!S.radios.bt){p("enable wifi or bt in shield first","err");break;}
-        p("scanning... (hardware bridge required for live radio)","sys");
-        p(" AP  34:2c:** -58dBm  ch6   WPA2");p(" AP  a0:91:** -71dBm  ch11  WPA2");p(" BLE 7c:64:** -66dBm  tag"); break;
+      case"scan": p("live Wi-Fi / BLE scan runs in the native radio module (next build).","sys");
+        p("no fake results shown here.","sys"); break;
       case"gps": p(S.radios.gps?"GPS enabled — acquiring (bridge required)":"GPS is OFF (shield). nothing is tracking you.","sys"); break;
       case"vault": p("vault: "+S.vault.length+" encrypted item(s). open Shield→vault to view."); break;
       case"db": p("offline database: "+S.records.length+" record(s). open Database module."); break;
@@ -500,57 +501,68 @@ V.terminal={
   noKeyRoute:true
 };
 
-V.python={
+/* self-contained SHA-256 (works with no secure context; input = byte string) */
+var sha256=function(a){function e(a,b){return a>>>b|a<<32-b}for(var b,c,d=Math.pow,f=d(2,32),g="length",h="",i=[],j=8*a[g],k=sha256.h=sha256.h||[],l=sha256.k=sha256.k||[],m=l[g],n={},o=2;64>m;o++)if(!n[o]){for(b=0;313>b;b+=o)n[b]=o;k[m]=d(o,.5)*f|0,l[m++]=d(o,1/3)*f|0}for(a+="\x80";a[g]%64-56;)a+="\x00";for(b=0;b<a[g];b++){if(c=a.charCodeAt(b),c>>8)return"";i[b>>2]|=c<<(3-b)%4*8}for(i[i[g]]=j/f|0,i[i[g]]=j,c=0;c<i[g];){var p=i.slice(c,c+=16),q=k;for(k=k.slice(0,8),b=0;64>b;b++){var r=p[b-15],s=p[b-2],t=k[0],u=k[4],v=k[7]+(e(u,6)^e(u,11)^e(u,25))+(u&k[5]^~u&k[6])+l[b]+(p[b]=16>b?p[b]:p[b-16]+(e(r,7)^e(r,18)^r>>>3)+p[b-7]+(e(s,17)^e(s,19)^s>>>10)|0),w=(e(t,2)^e(t,13)^e(t,22))+(t&k[1]^t&k[2]^k[1]&k[2]);k=[v+w|0].concat(k),k[4]=k[4]+v|0}for(b=0;8>b;b++)k[b]=k[b]+q[b]|0}for(b=0;8>b;b++)for(c=3;c+1;c--){var x=k[b]>>8*c&255;h+=(16>x?0:"")+x.toString(16)}return h};
+
+/* ---------- Toolkit: real offline crypto / data tools (no hardware) ---------- */
+V.toolkit={
   render:function(){
-    return head("PYTHON","λ","SCRIPTING")+
-      '<div class="card"><h3>ON-DEVICE SCRIPTING</h3>'+
-      '<div class="hint">FLIPPER X ships a scripting console for automation and research scripts. '+
-      'A full CPython 3 runtime installs from the bundled Termux package on first launch (offline, from the card).</div>'+
-      '<div class="note">Real CPython needs the native runtime (installed on deploy). This console runs the '+
-      'FLIPPER X mini-interpreter: variables, math, print(), and the fx.* hardware API.</div></div>'+
-      '<div id="term">'+S.pylog.map(function(l){return '<span class="c-'+l.c+'">'+esc(l.t)+'</span>';}).join("\n")+'</div>'+
-      '<div class="prompt"><span class="ps">&gt;&gt;&gt;</span><input id="pyin" autocomplete="off" spellcheck="false" placeholder="print(2**10)"></div>';
+    var o=S.tkout||"—";
+    return head("TOOLKIT","⚒","OFFLINE TOOLS")+
+      '<div class="card"><h3>INPUT</h3>'+
+      '<input class="inp" id="tkin" placeholder="text to hash / encode" value="'+esc(S.tkin||"")+'">'+
+      '<div style="margin-top:4px;line-height:1.9">'+
+      '<span class="btn" data-act="sha256">SHA-256</span>'+
+      '<span class="btn" data-act="b64e">Base64 ▸</span>'+
+      '<span class="btn" data-act="b64d">Base64 ◂</span>'+
+      '<span class="btn" data-act="hex">Hex</span>'+
+      '<span class="btn" data-act="urle">URL</span>'+
+      '<span class="btn" data-act="rev">Reverse</span>'+
+      '<span class="btn" data-act="pwd">Password</span>'+
+      '<span class="btn" data-act="uuid">UUID</span>'+
+      '</div></div>'+
+      '<div class="card"><h3>OUTPUT <span style="color:var(--dim)">(OK on output = copy)</span></h3>'+
+      '<div class="inp" id="tkout" data-act="copy" style="word-break:break-all;color:var(--accent2);min-height:34px;white-space:pre-wrap">'+esc(o)+'</div></div>'+
+      '<div class="hint">All on-device, offline. Type in the field (OK to edit), then pick a tool.</div>';
   },
-  mounted:function(){var i=document.getElementById("pyin");if(!i)return;i.focus();
-    i.addEventListener("keydown",function(e){
-      if(e.key==="Enter"){var v=i.value;S.pylog.push({t:">>> "+v,c:"in"});
-        var o=pyEval(v); S.pylog.push({t:o.t,c:o.c}); i.value=""; draw();e.preventDefault();}
-      else if(e.key==="Escape"){home();}
-      e.stopPropagation();
-    });
+  _set:function(s){ S.tkout=s; var out=document.getElementById("tkout"); if(out)out.textContent=s; },
+  click:function(t){
+    var a=t.closest('[data-act]'); if(!a)return; var act=a.dataset.act;
+    var inEl=document.getElementById("tkin"); if(inEl)S.tkin=inEl.value;
+    var v=S.tkin||"";
+    try{
+      if(act==="copy"){ var txt=S.tkout||""; try{navigator.clipboard&&navigator.clipboard.writeText(txt);}catch(e){} this._set((txt&&txt!=="—")?txt+"\n[copied]":txt); return; }
+      if(act==="pwd"){ var cs="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*-_"; var r=crypto.getRandomValues(new Uint32Array(24)),p=""; for(var i=0;i<24;i++)p+=cs[r[i]%cs.length]; this._set(p); return; }
+      if(act==="uuid"){ this._set((crypto.randomUUID?crypto.randomUUID():this._uuid())); return; }
+      if(act==="b64e"){ this._set(btoa(unescape(encodeURIComponent(v)))); return; }
+      if(act==="b64d"){ this._set(decodeURIComponent(escape(atob(v.trim())))); return; }
+      if(act==="hex"){ var h=""; for(var i=0;i<v.length;i++)h+=("0"+v.charCodeAt(i).toString(16)).slice(-2); this._set(h||"—"); return; }
+      if(act==="urle"){ this._set(encodeURIComponent(v)); return; }
+      if(act==="rev"){ this._set(v.split("").reverse().join("")); return; }
+      if(act==="sha256"){ this._set(sha256(unescape(encodeURIComponent(v)))||"—"); return; }
+    }catch(e){ this._set("error: "+e.message); }
   },
-  noKeyRoute:true
+  _uuid:function(){ var r=crypto.getRandomValues(new Uint8Array(16)); r[6]=(r[6]&0x0f)|0x40; r[8]=(r[8]&0x3f)|0x80;
+    var h=Array.from(r).map(function(b){return ("0"+b.toString(16)).slice(-2);}).join("");
+    return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20); }
 };
 
+/* ---------- Network: real connection info (live radio scan = native module, next build) ---------- */
 V.network={
   render:function(){
-    return head("NETWORK","≋","DIAGNOSTICS")+
-      '<div class="card"><h3>INTERFACES</h3>'+
-      '<div class="kv"><span>Wi-Fi (wlan0)</span><span style="color:'+(S.radios.wifi?'var(--accent)':'var(--dim)')+'">'+(S.radios.wifi?'UP':'DOWN')+'</span></div>'+
-      '<div class="kv"><span>Bluetooth (bt0)</span><span style="color:'+(S.radios.bt?'var(--accent)':'var(--dim)')+'">'+(S.radios.bt?'UP':'DOWN')+'</span></div>'+
-      '<div class="kv"><span>Cellular</span><span style="color:'+(S.radios.cell?'var(--accent)':'var(--dim)')+'">'+(S.radios.cell?'UP':'DOWN')+'</span></div>'+
-      '<div class="kv"><span>Internet</span><span>'+(navigator.onLine?'reachable':'offline')+'</span></div></div>'+
-      '<div class="card"><h3>SCAN</h3>'+
-      '<div class="row sel" data-act="scan"><span class="ri">⟳</span><div class="rt"><div class="t1">Scan nearby radios</div>'+
-      '<div class="t2">Wi-Fi APs + BLE beacons</div></div><span class="rv">Enter</span></div>'+
-      '<div id="scanout" class="hint" style="margin-top:6px"></div></div>'+
-      '<div class="note">Live radio capture needs the hardware bridge (enabled on deploy) or a USB-OTG adapter. '+
-      'Monitor-mode / injection are not supported by this phone\'s Wi-Fi chip.</div>'+
-      '<div class="card"><h3>CONNECTIVITY</h3>'+
-      '<div class="hint">Free network options that actually work: open Wi-Fi (libraries, cafes), a Lifeline plan if '+
-      'eligible, or any T-Mobile/AT&amp;T prepaid SIM once carrier-unlocked. No hidden tunnels — those are theft of service.</div></div>';
-  },
-  onKey:function(k){ if(k==="Enter"){this.scan();} },
-  click:function(t){ if(t.closest('[data-act="scan"]')) this.scan(); },
-  scan:function(){
-    var o=document.getElementById("scanout"); if(!o)return;
-    if(!S.radios.wifi&&!S.radios.bt){o.innerHTML='<span style="color:var(--warn)">enable Wi-Fi or Bluetooth in Shield first.</span>';return;}
-    o.innerHTML="scanning<span class='blink'>_</span>";
-    setTimeout(function(){o.innerHTML=
-      '<div class="kv"><span>AP · WPA2 · ch6</span><span>-58 dBm</span></div>'+
-      '<div class="kv"><span>AP · WPA2 · ch11</span><span>-71 dBm</span></div>'+
-      '<div class="kv"><span>BLE tag</span><span>-66 dBm</span></div>'+
-      '<div class="hint">demo capture · live radios via bridge/OTG</div>';},650);
+    var c=navigator.connection||{};
+    return head("NETWORK","≋","CONNECTION")+
+      '<div class="card"><h3>LINK (live)</h3>'+
+      '<div class="kv"><span>Online</span><span style="color:'+(navigator.onLine?'var(--accent)':'var(--warn)')+'">'+(navigator.onLine?'yes':'no')+'</span></div>'+
+      '<div class="kv"><span>Type</span><span>'+(c.effectiveType||c.type||'unknown')+'</span></div>'+
+      (c.downlink!=null?'<div class="kv"><span>Downlink</span><span>'+c.downlink+' Mbps</span></div>':'')+
+      (c.rtt!=null?'<div class="kv"><span>Latency</span><span>'+c.rtt+' ms</span></div>':'')+'</div>'+
+      '<div class="card"><h3>RADIO SCAN</h3>'+
+      '<div class="note">Live Wi-Fi + Bluetooth scanning — real networks and devices around you, with MAC, channel '+
+      'and signal — runs through the native radio module, shipping in the next build. No fake data here.</div></div>'+
+      '<div class="card"><h3>REACH</h3>'+
+      '<div class="hint">This OS has no INTERNET permission — it makes 0 outbound connections and nothing leaves the '+
+      'device. Monitor-mode / packet injection aren’t possible on this phone’s chipset without root.</div></div>';
   }
 };
 
@@ -564,9 +576,9 @@ V.comms={
       '<div class="card"><h3>SECURE NOTE / MESSAGE</h3>'+
       '<input class="inp" id="msgbody" placeholder="message (stored encrypted, offline)">'+
       '<input class="inp" id="msgto" placeholder="to (contact / callsign)">'+
-      '<span class="btn sel" data-act="send">▸ Store / Queue</span>'+
-      '<div class="note">Messages are stored encrypted on-device. When a radio is enabled they can relay over '+
-      'Bluetooth / Wi-Fi Direct mesh to nearby FLIPPER X units — no carrier, no servers.</div></div>'+
+      '<span class="btn sel" data-act="send">▸ Save note</span>'+
+      '<div class="note">These are encrypted notes saved on-device, offline. Real outbound SMS needs a SIM with '+
+      'carrier service and the native messaging module (a later build) — this tab does not secretly send anything.</div></div>'+
       '<div class="card"><h3>LOG</h3>'+msgs+'</div>';
   },
   click:function(t){ if(t.closest('[data-act="send"]')) this.send(); },
@@ -580,20 +592,45 @@ V.comms={
   }
 };
 
+/* ---------- Sensors: LIVE readings from the phone's real sensors ---------- */
 V.sensors={
   render:function(){
-    var se=S.sensors;
-    function st(n,on){return '<div class="kv"><span>'+n+'</span><span style="color:'+(on?'var(--warn)':'var(--accent)')+'">'+(on?'ACTIVE':'OFF')+'</span></div>';}
-    return head("SENSORS","◉","TRACKING STATUS")+
-      '<div class="card"><div class="big" style="color:var(--accent)">NOT TRACKED</div>'+
-      '<div class="hint">Every sensor that could locate or watch you is OFF by default and stays off until you '+
-      'turn it on. FLIPPER X never silently reads location, motion, mic or camera.</div></div>'+
-      '<div class="card"><h3>WHAT COULD TRACK YOU — ALL HELD OFF</h3>'+
-      st("GPS / GNSS",S.radios.gps)+st("Location services",se.loc)+st("Microphone",se.mic)+
-      st("Camera",se.cam)+st("Motion / accelerometer",se.motion)+st("Cell triangulation",S.radios.cell)+'</div>'+
-      '<div class="note">Reminder: any phone with a SIM and the cellular radio ON is locatable by the carrier via '+
-      'towers — that is physics, not software. Keep Cellular OFF (Shield) for true radio silence.</div>';
-  }
+    return head("SENSORS","◉","LIVE READOUT")+
+      '<div class="card"><h3>COMPASS / ORIENTATION</h3><div id="s-orient" class="hint">tilt or turn the phone…</div></div>'+
+      '<div class="card"><h3>MOTION / ACCELEROMETER</h3><div id="s-motion" class="hint">move the phone…</div></div>'+
+      '<div class="card"><h3>MAGNETOMETER · metal detector</h3><div id="s-mag" class="hint">reading…</div></div>'+
+      '<div class="hint">Live from the phone’s real hardware. A reading that stays blank means this phone has no such sensor.</div>';
+  },
+  mounted:function(){
+    var self=this;
+    this._oh=function(e){ var o=document.getElementById("s-orient"); if(!o){ window.removeEventListener("deviceorientation",self._oh,true); return; }
+      var hd=(e.alpha!=null)?Math.round((360-e.alpha)%360):null;
+      o.innerHTML='<div class="kv"><span>Heading</span><span style="color:var(--accent)">'+(hd!=null?hd+"°":"n/a")+'</span></div>'+
+        '<div class="kv"><span>Tilt F/B</span><span>'+(e.beta!=null?Math.round(e.beta)+"°":"n/a")+'</span></div>'+
+        '<div class="kv"><span>Tilt L/R</span><span>'+(e.gamma!=null?Math.round(e.gamma)+"°":"n/a")+'</span></div>'; };
+    window.addEventListener("deviceorientation",this._oh,true);
+    this._mh=function(e){ var m=document.getElementById("s-motion"); if(!m){ window.removeEventListener("devicemotion",self._mh,true); return; }
+      var a=e.accelerationIncludingGravity||e.acceleration||{};
+      var mag=Math.sqrt((a.x||0)*(a.x||0)+(a.y||0)*(a.y||0)+(a.z||0)*(a.z||0));
+      m.innerHTML='<div class="kv"><span>X</span><span>'+(a.x!=null?a.x.toFixed(2):"n/a")+'</span></div>'+
+        '<div class="kv"><span>Y</span><span>'+(a.y!=null?a.y.toFixed(2):"n/a")+'</span></div>'+
+        '<div class="kv"><span>Z</span><span>'+(a.z!=null?a.z.toFixed(2):"n/a")+'</span></div>'+
+        '<div class="kv"><span>Total</span><span style="color:var(--accent)">'+mag.toFixed(2)+' m/s²</span></div>'; };
+    window.addEventListener("devicemotion",this._mh,true);
+    try{
+      if("Magnetometer" in window){ var mg=new Magnetometer({frequency:10}); this._mg=mg;
+        mg.addEventListener("reading",function(){ var el=document.getElementById("s-mag");
+          if(!el){ try{mg.stop();}catch(e){} return; }
+          var f=Math.sqrt(mg.x*mg.x+mg.y*mg.y+mg.z*mg.z);
+          el.innerHTML='<div class="kv"><span>Field</span><span style="color:var(--accent)">'+f.toFixed(1)+' µT</span></div>'+
+            '<div class="hint">Earth is ~25–65 µT. Move near metal — the field jumps.</div>'; });
+        mg.addEventListener("error",function(){ var el=document.getElementById("s-mag"); if(el)el.textContent="no magnetometer on this phone"; });
+        mg.start();
+      } else { document.getElementById("s-mag").textContent="magnetometer not exposed in this build"; }
+    }catch(e){ var el=document.getElementById("s-mag"); if(el)el.textContent="no magnetometer"; }
+  },
+  unmounted:function(){ try{ window.removeEventListener("deviceorientation",this._oh,true);
+    window.removeEventListener("devicemotion",this._mh,true); if(this._mg)this._mg.stop(); }catch(e){} }
 };
 
 V.diag={
@@ -788,7 +825,7 @@ function pyEval(src){
 
 /* ---------- router / render ---------- */
 V.plugins.keys={};
-function open(id){S.view=id;S.sel=0;S._navIdx=0;draw();var v=V[id];if(v&&v.mounted)v.mounted();}
+function open(id){var pv=V[S.view];if(pv&&pv.unmounted){try{pv.unmounted();}catch(e){}}S.view=id;S.sel=0;S._navIdx=0;draw();var v=V[id];if(v&&v.mounted)v.mounted();}
 function home(){open("home");}
 function curV(){return V[S.view]||V.home;}
 function isGeneric(v){ return !v.noKeyRoute && v!==V.home && v!==V.music; }
