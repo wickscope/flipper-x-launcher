@@ -800,17 +800,98 @@ V.rflab={
       mod("Sub-GHz · CC1101","433/315/868 MHz over a CH340/CP210x serial bridge",["CH340","CP210x","CH9102","FTDI","CC1101","Arduino","ESP32"])+
       mod("RFID / NFC · PN532","125 kHz & 13.56 MHz read/write over USB",["PN532","PC/SC","Proxmark","ACR"])+
       mod("SDR · RTL-SDR","24–1700 MHz receive (spectrum, ADS-B, POCSAG)",["RTL-SDR","HackRF","SDR"])+
-      '<span class="btn sel" data-act="rescan">⟳ Re-scan USB</span></div>'+
-      '<div class="note">Modules light up here the instant you plug them into the USB-C OTG port — this is real hardware detection, not a placeholder. Two-way serial control of a detected module arrives in the next build; the attach + identify path is live now.</div>';
+      '<span class="btn sel" data-act="rescan">⟳ Re-scan USB</span>'+
+      '<span class="btn" data-act="serial">▸ Serial console</span></div>'+
+      '<div class="note">Modules light up here the instant you plug them into the USB-C OTG port — real hardware detection. Open the Serial console to actually talk to a connected UART module (CC1101 bridge, PN532, GPS, any CH340/CP210x/FTDI/CDC board).</div>';
   },
   mounted:function(){ try{ FXNATIVE.irInfo(); }catch(e){} try{ FXNATIVE.usbList(); }catch(e){} },
   click:function(t){
     var a=t.closest("[data-act]"); if(!a)return;
     if(a.dataset.act==="rescan"){ try{ FXNATIVE.usbList(); }catch(e){} }
+    else if(a.dataset.act==="serial"){ open("serial"); }
     else if(a.dataset.act==="irtest"){ S.irMsg="transmitting…"; var o=document.getElementById("irout"); if(o)o.textContent="transmitting…";
       try{ FXNATIVE.irTx(38000,"9000,4500,560,560,560,1690,560,560,560,1690,560,1690,560,560,560,40000"); }catch(e){ if(o)o.textContent="bridge unavailable"; } }
   }
 };
+
+/* ---------- Serial console: REAL two-way UART to an attached USB-OTG module ---------- */
+V.serial={
+  _baud:9600, _hex:false, _nl:"\r\n",
+  render:function(){
+    var self=this;
+    var devs=(S.serList&&S.serList.length)? S.serList.map(function(d,i){
+        var selp=(S.serSel===i)?' sel':'';
+        return '<div class="row'+selp+'" data-serdev="'+i+'"><span class="ri">⊐</span><div class="rt">'+
+          '<div class="t1">'+esc(d.name)+'</div><div class="t2">'+d.driver+' · '+d.vidhex+':'+d.pidhex+(d.hasPerm?'':' · needs OK')+'</div></div></div>';}).join("")
+      : '<div class="hint">'+esc(S.serListMsg||"no USB-serial module found — plug one into the OTG port and Re-scan")+'</div>';
+    var bauds=[9600,19200,38400,57600,115200].map(function(b){
+      return '<span class="btn'+(self._baud===b?' sel':'')+'" data-baud="'+b+'">'+b+'</span>';}).join("");
+    var conn=S.serOpen
+      ? '<span class="btn danger" data-act="disc">■ Disconnect</span>'
+      : '<span class="btn sel" data-act="conn">▶ Connect</span><span class="btn" data-act="scan">⟳ Re-scan</span>';
+    var log=(S.serLog&&S.serLog.length)? S.serLog.slice(-80).map(function(l){
+        var c=l.d==="tx"?"c-in":(l.d==="sys"?"c-sys":"c-out");
+        return '<span class="'+c+'">'+esc(l.t)+'</span>';}).join("\n") : '';
+    return head("SERIAL","▭","USB-OTG UART")+
+      '<div class="card"><h3>DEVICE</h3>'+devs+'</div>'+
+      '<div class="card"><h3>BAUD</h3><div style="line-height:2">'+bauds+'</div>'+conn+
+      '<div style="margin-top:4px"><span class="btn'+(this._hex?'':' sel')+'" data-act="mtext">TEXT</span>'+
+      '<span class="btn'+(this._hex?' sel':'')+'" data-act="mhex">HEX</span>'+
+      '<span class="btn'+(this._nl?' sel':'')+'" data-act="nl">NL '+(this._nl?'on':'off')+'</span></div></div>'+
+      '<div class="card" style="padding:7px"><h3 style="padding:0 2px">CONSOLE</h3>'+
+      '<div id="serlog" style="font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;max-height:150px;overflow-y:auto">'+log+'</div></div>'+
+      '<div class="card"><input class="inp" id="serin" placeholder="'+(this._hex?'hex bytes e.g. 00 FF D4 02':'type, Send appends newline')+'" autocomplete="off" autocapitalize="off" spellcheck="false">'+
+      '<span class="btn sel" data-act="send">▸ Send</span>'+
+      '<span class="btn" data-act="pPN532">PN532 ver</span><span class="btn" data-act="pAT">AT</span></div>'+
+      '<div class="note">Opens the real USB device and exchanges real bytes. CC1101/PN532 breakouts on a CH340/CP210x bridge, GPS modules, Arduino/ESP firmwares — all talk here. Nothing leaves the phone.</div>';
+  },
+  mounted:function(){ try{ FXNATIVE.serialList(); }catch(e){ S.serListMsg="serial bridge unavailable"; }
+    var self=this,i=document.getElementById("serin");
+    if(i)i.addEventListener("keydown",function(e){ if(e.key==="Enter"){ self._send(); e.preventDefault(); e.stopPropagation(); } });
+    var el=document.getElementById("serlog"); if(el)el.scrollTop=el.scrollHeight; },
+  _append:function(dir,text){ if(!S.serLog)S.serLog=[]; S.serLog.push({d:dir,t:text}); if(S.serLog.length>400)S.serLog.splice(0,200);
+    var el=document.getElementById("serlog"); if(el){ var span=document.createElement("span");
+      span.className=dir==="tx"?"c-in":(dir==="sys"?"c-sys":"c-out"); span.textContent=(el.textContent?"\n":"")+text;
+      el.appendChild(span); el.scrollTop=el.scrollHeight; } },
+  click:function(t){
+    var dv=t.closest("[data-serdev]"); if(dv){ S.serSel=+dv.dataset.serdev; draw(); return; }
+    var bd=t.closest("[data-baud]"); if(bd){ this._baud=+bd.dataset.baud; draw(); return; }
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act;
+    if(act==="scan"){ try{ FXNATIVE.serialList(); }catch(e){} }
+    else if(act==="conn"){ this._connect(); }
+    else if(act==="disc"){ try{ FXNATIVE.serialClose(); }catch(e){} }
+    else if(act==="mtext"){ this._hex=false; draw(); }
+    else if(act==="mhex"){ this._hex=true; draw(); }
+    else if(act==="nl"){ this._nl=this._nl?"":"\r\n"; draw(); }
+    else if(act==="send"){ this._send(); }
+    else if(act==="pPN532"){ this._sendRaw("55 55 00 00 00 00 FF 02 FE D4 02 2A 00",true); }
+    else if(act==="pAT"){ this._sendRaw("AT",false); }
+  },
+  _connect:function(){
+    var i=(S.serSel!=null)?S.serSel:0; var d=S.serList&&S.serList[i];
+    if(!d){ this._append("sys","no device selected"); return; }
+    this._append("sys","opening "+d.vidhex+":"+d.pidhex+" @ "+this._baud+"…");
+    try{ FXNATIVE.serialOpen(d.vid,d.pid,this._baud); }catch(e){ this._append("sys","bridge unavailable"); }
+  },
+  _send:function(){ var i=document.getElementById("serin"); if(!i)return; var v=i.value; if(!v)return;
+    this._sendRaw(v,this._hex); i.value=""; },
+  _sendRaw:function(v,hex){
+    if(!S.serOpen){ this._append("sys","not connected"); return; }
+    try{
+      if(hex){ FXNATIVE.serialWriteHex(v); this._append("tx","» "+v); }
+      else { FXNATIVE.serialWrite(v+(this._nl||"")); this._append("tx","» "+v); }
+    }catch(e){ this._append("sys","write failed"); }
+  },
+  unmounted:function(){ try{ FXNATIVE.serialClose(); }catch(e){} }
+};
+/* native -> web serial callbacks */
+window.FXSERIALLIST=function(arr){ S.serList=arr||[]; S.serListMsg=S.serList.length?null:"no USB-serial module found";
+  if(S.serSel==null||S.serSel>=S.serList.length)S.serSel=S.serList.length?0:null;
+  if(S.view==="serial")draw(); };
+window.FXSERIAL=function(open,msg){ var was=S.serOpen; S.serOpen=!!open;
+  if(S.view==="serial"){ if(was!==S.serOpen){ draw(); } if(V.serial._append)V.serial._append("sys",(open?"● connected · ":"○ ")+(msg||"")); } };
+window.FXSERIALRX=function(hex,text){ if(S.view!=="serial"||!V.serial._append)return;
+  V.serial._append("rx", V.serial._hex ? hex : (text||"").replace(/\r/g,"")); };
 
 /* ---------- Hardware: USB-OTG host, device self-recon, honest sensors, outputs ---------- */
 V.hardware={
@@ -1084,7 +1165,7 @@ V.settings={
 function head(t,ic,tag){return '<div class="vhead"><span class="ico">'+ic+'</span><div>'+
   '<div class="tag">'+tag+'</div><h1>'+t+'</h1></div></div>';}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-var BUILD="2026.11.17·b16", BOOTED=Date.now();
+var BUILD="2026.11.17·b17", BOOTED=Date.now();
 S.pylog=[{t:"FLIPPER X python console — fx.* API ready",c:"sys"}];
 
 function pyEval(src){
