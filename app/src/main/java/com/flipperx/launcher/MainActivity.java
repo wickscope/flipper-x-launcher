@@ -3,15 +3,24 @@ package com.flipperx.launcher;
 import android.Manifest;
 import android.app.Activity;
 import android.app.KeyguardManager;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.net.wifi.ScanResult;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -68,6 +77,7 @@ public class MainActivity extends Activity {
             }
         });
 
+        web.addJavascriptInterface(new RadioBridge(), "FXNATIVE");
         web.setBackgroundColor(0xFF060D0B);
         web.loadUrl("file:///android_asset/flipperx/index.html");
 
@@ -100,6 +110,15 @@ public class MainActivity extends Activity {
         // Lid closed / screen off / backgrounded: halt ALL WebView work (JS, rAF, timers,
         // media decode) so the phone stops heating up while idle or closed.
         if (web != null) { web.onPause(); web.pauseTimers(); }
+        stopBt();
+    }
+
+    @Override
+    protected void onDestroy() {
+        try { if (wifiRx != null) unregisterReceiver(wifiRx); } catch (Exception e) {}
+        try { if (btRx != null) unregisterReceiver(btRx); } catch (Exception e) {}
+        wifiRx = null; btRx = null;
+        super.onDestroy();
     }
 
     @Override
@@ -127,7 +146,130 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int req, String[] p, int[] r) {
         super.onRequestPermissionsResult(req, p, r);
+        boolean granted = r.length > 0;
+        for (int v : r) if (v != PackageManager.PERMISSION_GRANTED) granted = false;
         if (req == REQ_READ) injectPlaylist();
+        else if (req == REQ_WIFI) { if (granted) doWifiScan(); else js("window.FXWIFI&&FXWIFI(null,'location permission denied \u2014 Android requires it for Wi-Fi scanning')"); }
+        else if (req == REQ_BT)   { if (granted) doBtScan();   else js("window.FXBT&&FXBT(null,'Bluetooth permission denied')"); }
+    }
+
+    // ---------------- Radio recon bridge (real Wi-Fi + Bluetooth scanning) ----------------
+    private static final int REQ_WIFI = 51, REQ_BT = 52;
+    private BroadcastReceiver wifiRx, btRx;
+
+    /** Run JS on the UI thread. */
+    private void js(final String code) {
+        runOnUiThread(new Runnable() { public void run() {
+            if (web != null) try { web.evaluateJavascript(code, null); } catch (Exception ignored) {}
+        }});
+    }
+    private static String esc(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ").replace("\r", " ");
+    }
+
+    final class RadioBridge {
+        @JavascriptInterface public void wifiScan() { runOnUiThread(new Runnable(){ public void run(){ startWifi(); }}); }
+        @JavascriptInterface public void btScan()   { runOnUiThread(new Runnable(){ public void run(){ startBt(); }}); }
+        @JavascriptInterface public void btStop()    { runOnUiThread(new Runnable(){ public void run(){ stopBt(); }}); }
+    }
+
+    private void startWifi() {
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            try { requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_WIFI); } catch (Exception e) {}
+            return;
+        }
+        doWifiScan();
+    }
+
+    private void doWifiScan() {
+        final WifiManager wm = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (wm == null) { js("window.FXWIFI&&FXWIFI(null,'no Wi-Fi hardware')"); return; }
+        if (!wm.isWifiEnabled()) { js("window.FXWIFI&&FXWIFI(null,'turn Wi-Fi ON in Shield first')"); return; }
+        if (wifiRx == null) {
+            wifiRx = new BroadcastReceiver() {
+                public void onReceive(Context c, Intent i) { emitWifi(wm); }
+            };
+            try { registerReceiver(wifiRx, new IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)); } catch (Exception e) {}
+        }
+        emitWifi(wm);          // cached results immediately
+        try { wm.startScan(); } catch (Exception e) {}   // trigger a fresh scan (throttled on newer Android)
+    }
+
+    private void emitWifi(WifiManager wm) {
+        try {
+            List<ScanResult> res = wm.getScanResults();
+            JSONArray arr = new JSONArray();
+            for (ScanResult r : res) {
+                JSONObject o = new JSONObject();
+                o.put("ssid", (r.SSID == null || r.SSID.isEmpty()) ? "<hidden>" : r.SSID);
+                o.put("bssid", r.BSSID);
+                o.put("rssi", r.level);
+                o.put("freq", r.frequency);
+                o.put("chan", freqToChannel(r.frequency));
+                String cap = r.capabilities == null ? "" : r.capabilities;
+                o.put("sec", cap.contains("WPA3") ? "WPA3" : cap.contains("WPA2") ? "WPA2"
+                        : cap.contains("WPA") ? "WPA" : cap.contains("WEP") ? "WEP" : "open");
+                arr.put(o);
+            }
+            js("window.FXWIFI&&FXWIFI(" + arr.toString() + ",null)");
+        } catch (Exception e) { js("window.FXWIFI&&FXWIFI(null,'" + esc(e.getMessage()) + "')"); }
+    }
+
+    private static int freqToChannel(int f) {
+        if (f == 2484) return 14;
+        if (f >= 2412 && f <= 2472) return (f - 2412) / 5 + 1;
+        if (f >= 5170 && f <= 5825) return (f - 5000) / 5;
+        if (f >= 5955 && f <= 7115) return (f - 5950) / 5;   // 6GHz
+        return 0;
+    }
+
+    private void startBt() {
+        String[] need;
+        if (Build.VERSION.SDK_INT >= 31) need = new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT"};
+        else need = new String[]{Manifest.permission.ACCESS_FINE_LOCATION};
+        boolean ok = true;
+        for (String p : need) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) ok = false;
+        if (!ok) { try { requestPermissions(need, REQ_BT); } catch (Exception e) {} return; }
+        doBtScan();
+    }
+
+    private void doBtScan() {
+        BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter ad = bm != null ? bm.getAdapter() : BluetoothAdapter.getDefaultAdapter();
+        if (ad == null) { js("window.FXBT&&FXBT(null,'no Bluetooth hardware')"); return; }
+        if (!ad.isEnabled()) { js("window.FXBT&&FXBT(null,'turn Bluetooth ON in Shield first')"); return; }
+        if (btRx == null) {
+            btRx = new BroadcastReceiver() {
+                public void onReceive(Context c, Intent i) {
+                    if (!BluetoothDevice.ACTION_FOUND.equals(i.getAction())) return;
+                    try {
+                        BluetoothDevice d = i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                        short rssi = i.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) 0);
+                        String name = "";
+                        try { name = d.getName(); } catch (SecurityException se) {}
+                        JSONObject o = new JSONObject();
+                        o.put("name", name == null || name.isEmpty() ? "<unknown>" : name);
+                        o.put("mac", d.getAddress());
+                        o.put("rssi", rssi);
+                        js("window.FXBT&&FXBT(" + o.toString() + ",null)");
+                    } catch (Exception e) {}
+                }
+            };
+            try { registerReceiver(btRx, new IntentFilter(BluetoothDevice.ACTION_FOUND)); } catch (Exception e) {}
+        }
+        try { if (ad.isDiscovering()) ad.cancelDiscovery(); ad.startDiscovery(); js("window.FXBT&&FXBT(null,'scanning\u2026')"); }
+        catch (SecurityException se) { js("window.FXBT&&FXBT(null,'Bluetooth permission denied')"); }
+        catch (Exception e) { js("window.FXBT&&FXBT(null,'" + esc(e.getMessage()) + "')"); }
+    }
+
+    private void stopBt() {
+        try {
+            BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter ad = bm != null ? bm.getAdapter() : BluetoothAdapter.getDefaultAdapter();
+            if (ad != null && ad.isDiscovering()) ad.cancelDiscovery();
+        } catch (Exception e) {}
     }
 
     /** Scan every Music folder we can reach and hand the list to the web layer. */

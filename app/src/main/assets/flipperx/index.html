@@ -580,23 +580,46 @@ V.toolkit={
     return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20); }
 };
 
-/* ---------- Network: real connection info (live radio scan = native module, next build) ---------- */
+/* ---------- Network: REAL Wi-Fi + Bluetooth scanning via the native bridge ---------- */
 V.network={
   render:function(){
-    var c=navigator.connection||{};
-    return head("NETWORK","≋","CONNECTION")+
-      '<div class="card"><h3>LINK (live)</h3>'+
-      '<div class="kv"><span>Online</span><span style="color:'+(navigator.onLine?'var(--accent)':'var(--warn)')+'">'+(navigator.onLine?'yes':'no')+'</span></div>'+
-      '<div class="kv"><span>Type</span><span>'+(c.effectiveType||c.type||'unknown')+'</span></div>'+
-      (c.downlink!=null?'<div class="kv"><span>Downlink</span><span>'+c.downlink+' Mbps</span></div>':'')+
-      (c.rtt!=null?'<div class="kv"><span>Latency</span><span>'+c.rtt+' ms</span></div>':'')+'</div>'+
-      '<div class="card"><h3>RADIO SCAN</h3>'+
-      '<div class="note">Live Wi-Fi + Bluetooth scanning — real networks and devices around you, with MAC, channel '+
-      'and signal — runs through the native radio module, shipping in the next build. No fake data here.</div></div>'+
-      '<div class="card"><h3>REACH</h3>'+
-      '<div class="hint">This OS has no INTERNET permission — it makes 0 outbound connections and nothing leaves the '+
-      'device. Monitor-mode / packet injection aren’t possible on this phone’s chipset without root.</div></div>';
-  }
+    var wifi=(S.wifiList&&S.wifiList.length)? S.wifiList.map(function(a){
+        return '<div class="row"><span class="ri">≈</span><div class="rt"><div class="t1">'+esc(a.ssid)+'</div>'+
+          '<div class="t2">'+esc(a.bssid)+' · ch'+a.chan+' · '+a.sec+'</div></div><span class="rv">'+a.rssi+'</span></div>';}).join("")
+      : '<div class="hint">'+esc(S.wifiMsg||'press Scan to list real networks')+'</div>';
+    var bt=(S.btList&&S.btList.length)? S.btList.map(function(d){
+        return '<div class="row"><span class="ri">◉</span><div class="rt"><div class="t1">'+esc(d.name)+'</div>'+
+          '<div class="t2">'+esc(d.mac)+'</div></div><span class="rv">'+d.rssi+'</span></div>';}).join("")
+      : '<div class="hint">'+esc(S.btMsg||'press Scan to list real devices')+'</div>';
+    return head("NETWORK","≫","RADIO RECON")+
+      '<div class="card"><h3>WI-FI'+(S.wifiList&&S.wifiList.length?' ('+S.wifiList.length+')':'')+'</h3>'+
+      '<span class="btn sel" data-act="wifi">⟳ Scan Wi-Fi</span>'+wifi+'</div>'+
+      '<div class="card"><h3>BLUETOOTH'+(S.btList&&S.btList.length?' ('+S.btList.length+')':'')+'</h3>'+
+      '<span class="btn" data-act="bt">⟳ Scan Bluetooth</span>'+bt+'</div>'+
+      '<div class="note">Live radios around you — real SSIDs, MACs, channels, signal and nearby Bluetooth devices. Android requires the location permission to scan; nothing leaves the phone (no internet). Monitor-mode / injection aren’t possible on this chipset.</div>';
+  },
+  click:function(t){
+    var a=t.closest("[data-act]"); if(!a)return;
+    if(a.dataset.act==="wifi"){ S.wifiList=null; S.wifiMsg="scanning…"; draw();
+      try{ FXNATIVE.wifiScan(); }catch(e){ S.wifiMsg="native radio bridge not available"; draw(); } }
+    if(a.dataset.act==="bt"){ S.btList=[]; S.btMsg="scanning… (finds devices over ~12s)"; draw();
+      try{ FXNATIVE.btScan(); }catch(e){ S.btMsg="native radio bridge not available"; draw(); } }
+  },
+  unmounted:function(){ try{ FXNATIVE.btStop(); }catch(e){} }
+};
+/* native -> web callbacks */
+window.FXWIFI=function(arr,err){
+  if(err){ S.wifiMsg=err; S.wifiList=null; }
+  else { S.wifiList=(arr||[]).slice().sort(function(a,b){return b.rssi-a.rssi;}); S.wifiMsg=S.wifiList.length?null:"no networks found"; }
+  if(S.view==="network")draw();
+};
+window.FXBT=function(obj,err){
+  if(err){ S.btMsg=err; if(S.view==="network" && (!S.btList||!S.btList.length))draw(); return; }
+  if(!obj||!obj.mac)return;
+  if(!S.btList)S.btList=[];
+  var hit=false; for(var i=0;i<S.btList.length;i++) if(S.btList[i].mac===obj.mac){ S.btList[i]=obj; hit=true; break; }
+  if(!hit)S.btList.push(obj);
+  S.btMsg=null; if(S.view==="network")draw();
 };
 
 V.comms={
