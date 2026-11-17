@@ -243,12 +243,12 @@ public class MainActivity extends Activity {
         // ---- USB-serial (talk to attached modules: CC1101, PN532, generic UART) ----
         @JavascriptInterface public void serialList(){ runOnUiThread(new Runnable(){ public void run(){ emitSerialList(); }}); }
         @JavascriptInterface public void serialOpen(final int vid, final int pid, final int baud){
-            runOnUiThread(new Runnable(){ public void run(){ serialOpen(vid, pid, baud); }}); }
+            runOnUiThread(new Runnable(){ public void run(){ MainActivity.this.serialOpen(vid, pid, baud); }}); }
         @JavascriptInterface public void serialWrite(final String text){
-            runOnUiThread(new Runnable(){ public void run(){ serialWrite(text, false); }}); }
+            runOnUiThread(new Runnable(){ public void run(){ MainActivity.this.serialWrite(text, false); }}); }
         @JavascriptInterface public void serialWriteHex(final String hex){
-            runOnUiThread(new Runnable(){ public void run(){ serialWrite(hex, true); }}); }
-        @JavascriptInterface public void serialClose(){ runOnUiThread(new Runnable(){ public void run(){ serialClose(); }}); }
+            runOnUiThread(new Runnable(){ public void run(){ MainActivity.this.serialWrite(hex, true); }}); }
+        @JavascriptInterface public void serialClose(){ runOnUiThread(new Runnable(){ public void run(){ MainActivity.this.serialClose(); }}); }
     }
 
     // ---------------- USB-serial engine ----------------
