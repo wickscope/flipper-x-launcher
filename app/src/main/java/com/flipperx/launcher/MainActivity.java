@@ -52,12 +52,20 @@ import android.webkit.WebViewClient;
 
 import android.hardware.usb.UsbManager;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbInterface;
+import android.app.PendingIntent;
+
+import com.hoho.android.usbserial.driver.UsbSerialDriver;
+import com.hoho.android.usbserial.driver.UsbSerialPort;
+import com.hoho.android.usbserial.driver.UsbSerialProber;
+import com.hoho.android.usbserial.util.SerialInputOutputManager;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -154,6 +162,7 @@ public class MainActivity extends Activity {
         }
         stopBt();
         stopGnss();
+        serialClosePort();
         try { doTorch(false); } catch (Exception e) {}
     }
 
@@ -161,7 +170,9 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         try { if (wifiRx != null) unregisterReceiver(wifiRx); } catch (Exception e) {}
         try { if (btRx != null) unregisterReceiver(btRx); } catch (Exception e) {}
-        wifiRx = null; btRx = null;
+        try { if (usbPermRx != null) unregisterReceiver(usbPermRx); } catch (Exception e) {}
+        wifiRx = null; btRx = null; usbPermRx = null;
+        serialClosePort();
         super.onDestroy();
     }
 
@@ -229,6 +240,132 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void sysRecon() { runOnUiThread(new Runnable(){ public void run(){ emitSys(); }}); }
         @JavascriptInterface public void torch(final boolean on){ runOnUiThread(new Runnable(){ public void run(){ doTorch(on); }}); }
         @JavascriptInterface public void vibrate(final int ms){ doVibrate(ms); }
+        // ---- USB-serial (talk to attached modules: CC1101, PN532, generic UART) ----
+        @JavascriptInterface public void serialList(){ runOnUiThread(new Runnable(){ public void run(){ emitSerialList(); }}); }
+        @JavascriptInterface public void serialOpen(final int vid, final int pid, final int baud){
+            runOnUiThread(new Runnable(){ public void run(){ serialOpen(vid, pid, baud); }}); }
+        @JavascriptInterface public void serialWrite(final String text){
+            runOnUiThread(new Runnable(){ public void run(){ serialWrite(text, false); }}); }
+        @JavascriptInterface public void serialWriteHex(final String hex){
+            runOnUiThread(new Runnable(){ public void run(){ serialWrite(hex, true); }}); }
+        @JavascriptInterface public void serialClose(){ runOnUiThread(new Runnable(){ public void run(){ serialClose(); }}); }
+    }
+
+    // ---------------- USB-serial engine ----------------
+    private static final String ACTION_USB_PERM = "com.flipperx.launcher.USB_PERM";
+    private UsbSerialPort fxPort;
+    private SerialInputOutputManager fxIo;
+    private BroadcastReceiver usbPermRx;
+    private int pendVid, pendPid, pendBaud;
+
+    private void emitSerialList() {
+        try {
+            UsbManager um = (UsbManager) getSystemService(Context.USB_SERVICE);
+            JSONArray arr = new JSONArray();
+            if (um != null) {
+                List<UsbSerialDriver> drivers = UsbSerialProber.getDefaultProber().findAllDrivers(um);
+                for (UsbSerialDriver drv : drivers) {
+                    UsbDevice d = drv.getDevice();
+                    JSONObject o = new JSONObject();
+                    o.put("vid", d.getVendorId()); o.put("pid", d.getProductId());
+                    o.put("vidhex", String.format("%04x", d.getVendorId()));
+                    o.put("pidhex", String.format("%04x", d.getProductId()));
+                    String pn=null; try { pn=d.getProductName(); } catch (Exception e) {}
+                    o.put("name", pn==null? d.getDeviceName() : pn);
+                    String cls = drv.getClass().getSimpleName().replace("SerialDriver","");
+                    o.put("driver", cls);
+                    o.put("ports", drv.getPorts().size());
+                    o.put("hasPerm", um.hasPermission(d));
+                    arr.put(o);
+                }
+            }
+            js("window.FXSERIALLIST&&FXSERIALLIST(" + arr.toString() + ")");
+        } catch (Exception e) { js("window.FXSERIALLIST&&FXSERIALLIST([])"); }
+    }
+
+    private void serialOpen(int vid, int pid, int baud) {
+        try {
+            UsbManager um = (UsbManager) getSystemService(Context.USB_SERVICE);
+            if (um == null) { serialStatus(false, "no USB host service"); return; }
+            UsbSerialDriver target = null;
+            for (UsbSerialDriver drv : UsbSerialProber.getDefaultProber().findAllDrivers(um)) {
+                UsbDevice d = drv.getDevice();
+                if (d.getVendorId()==vid && d.getProductId()==pid) { target = drv; break; }
+            }
+            if (target == null) { serialStatus(false, "no serial driver — is the module attached?"); return; }
+            UsbDevice dev = target.getDevice();
+            if (!um.hasPermission(dev)) {
+                pendVid=vid; pendPid=pid; pendBaud=baud;
+                if (usbPermRx == null) {
+                    usbPermRx = new BroadcastReceiver() {
+                        public void onReceive(Context c, Intent i) {
+                            if (!ACTION_USB_PERM.equals(i.getAction())) return;
+                            boolean granted = i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
+                            if (granted) serialOpen(pendVid, pendPid, pendBaud);
+                            else serialStatus(false, "USB permission denied");
+                        }
+                    };
+                    IntentFilter f = new IntentFilter(ACTION_USB_PERM);
+                    if (Build.VERSION.SDK_INT >= 33) registerReceiver(usbPermRx, f, Context.RECEIVER_NOT_EXPORTED);
+                    else registerReceiver(usbPermRx, f);
+                }
+                int flag = (Build.VERSION.SDK_INT >= 31) ? PendingIntent.FLAG_MUTABLE : 0;
+                Intent it = new Intent(ACTION_USB_PERM).setPackage(getPackageName());
+                PendingIntent pi = PendingIntent.getBroadcast(this, 0, it, flag);
+                um.requestPermission(dev, pi);
+                serialStatus(false, "allow the USB permission popup…");
+                return;
+            }
+            UsbDeviceConnection conn = um.openDevice(dev);
+            if (conn == null) { serialStatus(false, "could not open USB device"); return; }
+            serialClosePort();   // close any previous
+            UsbSerialPort port = target.getPorts().get(0);
+            port.open(conn);
+            port.setParameters(baud, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            try { port.setDTR(true); port.setRTS(true); } catch (Exception e) {}
+            fxPort = port;
+            fxIo = new SerialInputOutputManager(port, new SerialInputOutputManager.Listener() {
+                public void onNewData(byte[] data) { emitSerialRx(data); }
+                public void onRunError(Exception e) { serialStatus(false, "serial read error: " + e.getMessage()); }
+            });
+            fxIo.start();
+            serialStatus(true, target.getClass().getSimpleName().replace("SerialDriver","") + " @ " + baud);
+        } catch (Exception e) { serialStatus(false, e.getMessage()==null? "open failed" : e.getMessage()); }
+    }
+
+    private void serialWrite(String s, boolean hex) {
+        try {
+            if (fxPort == null) { serialStatus(false, "not connected"); return; }
+            byte[] out;
+            if (hex) {
+                String h = s.replaceAll("[^0-9a-fA-F]", "");
+                int n = h.length()/2; out = new byte[n];
+                for (int i=0;i<n;i++) out[i]=(byte) Integer.parseInt(h.substring(i*2,i*2+2),16);
+            } else {
+                out = s.getBytes(StandardCharsets.UTF_8);
+            }
+            fxPort.write(out, 1000);
+        } catch (Exception e) { serialStatus(false, "write failed: " + e.getMessage()); }
+    }
+
+    private void serialClose() { serialClosePort(); serialStatus(false, "closed"); }
+    private void serialClosePort() {
+        try { if (fxIo != null) { fxIo.stop(); fxIo = null; } } catch (Exception e) {}
+        try { if (fxPort != null) { fxPort.close(); fxPort = null; } } catch (Exception e) {}
+    }
+
+    private void serialStatus(boolean open, String msg) {
+        js("window.FXSERIAL&&FXSERIAL(" + open + ",'" + esc(msg) + "')");
+    }
+    private void emitSerialRx(byte[] data) {
+        if (data == null || data.length == 0) return;
+        StringBuilder hx = new StringBuilder(), tx = new StringBuilder();
+        for (byte b : data) {
+            int v = b & 0xff;
+            hx.append(String.format("%02x ", v));
+            tx.append((v>=32 && v<127) ? (char)v : (v==10||v==13 ? (char)v : '.'));
+        }
+        js("window.FXSERIALRX&&FXSERIALRX('" + esc(hx.toString().trim()) + "','" + esc(tx.toString()) + "')");
     }
 
     // ---------------- Cell-tower recon ----------------
