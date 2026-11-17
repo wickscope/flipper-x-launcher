@@ -801,7 +801,8 @@ V.rflab={
       mod("RFID / NFC · PN532","125 kHz & 13.56 MHz read/write over USB",["PN532","PC/SC","Proxmark","ACR"])+
       mod("SDR · RTL-SDR","24–1700 MHz receive (spectrum, ADS-B, POCSAG)",["RTL-SDR","HackRF","SDR"])+
       '<span class="btn sel" data-act="rescan">⟳ Re-scan USB</span>'+
-      '<span class="btn" data-act="serial">▸ Serial console</span></div>'+
+      '<span class="btn" data-act="serial">▸ Serial console</span>'+
+      '<span class="btn" data-act="nfc">▸ NFC reader</span></div>'+
       '<div class="note">Modules light up here the instant you plug them into the USB-C OTG port — real hardware detection. Open the Serial console to actually talk to a connected UART module (CC1101 bridge, PN532, GPS, any CH340/CP210x/FTDI/CDC board).</div>';
   },
   mounted:function(){ try{ FXNATIVE.irInfo(); }catch(e){} try{ FXNATIVE.usbList(); }catch(e){} },
@@ -809,6 +810,7 @@ V.rflab={
     var a=t.closest("[data-act]"); if(!a)return;
     if(a.dataset.act==="rescan"){ try{ FXNATIVE.usbList(); }catch(e){} }
     else if(a.dataset.act==="serial"){ open("serial"); }
+    else if(a.dataset.act==="nfc"){ open("nfc"); }
     else if(a.dataset.act==="irtest"){ S.irMsg="transmitting…"; var o=document.getElementById("irout"); if(o)o.textContent="transmitting…";
       try{ FXNATIVE.irTx(38000,"9000,4500,560,560,560,1690,560,560,560,1690,560,1690,560,560,560,40000"); }catch(e){ if(o)o.textContent="bridge unavailable"; } }
   }
@@ -845,8 +847,12 @@ V.serial={
       '<span class="btn" data-act="pPN532">PN532 ver</span><span class="btn" data-act="pAT">AT</span></div>'+
       '<div class="note">Opens the real USB device and exchanges real bytes. CC1101/PN532 breakouts on a CH340/CP210x bridge, GPS modules, Arduino/ESP firmwares — all talk here. Nothing leaves the phone.</div>';
   },
-  mounted:function(){ try{ FXNATIVE.serialList(); }catch(e){ S.serListMsg="serial bridge unavailable"; }
-    var self=this,i=document.getElementById("serin");
+  mounted:function(){ var self=this;
+    window.__fxSerRx=function(hex,text){ self._append("rx", self._hex?hex:(text||"").replace(/\r/g,"")); };
+    window.__fxSerOpenCb=function(open,msg){ var w=self._wasOpen; self._wasOpen=open; if(w!==open)draw();
+      self._append("sys",(open?"● connected · ":"○ ")+(msg||"")); };
+    try{ FXNATIVE.serialList(); }catch(e){ S.serListMsg="serial bridge unavailable"; }
+    var i=document.getElementById("serin");
     if(i)i.addEventListener("keydown",function(e){ if(e.key==="Enter"){ self._send(); e.preventDefault(); e.stopPropagation(); } });
     var el=document.getElementById("serlog"); if(el)el.scrollTop=el.scrollHeight; },
   _append:function(dir,text){ if(!S.serLog)S.serLog=[]; S.serLog.push({d:dir,t:text}); if(S.serLog.length>400)S.serLog.splice(0,200);
@@ -882,16 +888,103 @@ V.serial={
       else { FXNATIVE.serialWrite(v+(this._nl||"")); this._append("tx","» "+v); }
     }catch(e){ this._append("sys","write failed"); }
   },
-  unmounted:function(){ try{ FXNATIVE.serialClose(); }catch(e){} }
+  unmounted:function(){ window.__fxSerRx=null; window.__fxSerOpenCb=null; try{ FXNATIVE.serialClose(); }catch(e){} }
 };
-/* native -> web serial callbacks */
+
+/* ---------- NFC: real 13.56 MHz read via an attached PN532 over the serial bridge ---------- */
+/* (this phone has NO onboard NFC — verified — so NFC is a USB-OTG module capability) */
+var PN532={
+  frame:function(cmd){ var len=cmd.length+1, lcs=(0x100-len)&0xff, sum=0xD4, i;
+    for(i=0;i<cmd.length;i++)sum+=cmd[i]; var dcs=(0x100-(sum&0xff))&0xff;
+    return [0x00,0x00,0xFF,len,lcs,0xD4].concat(cmd).concat([dcs,0x00]); },
+  toHex:function(a){ return a.map(function(b){return ("0"+(b&0xff).toString(16)).slice(-2);}).join(""); },
+  sak:function(s){ return ({0x08:"MIFARE Classic 1K",0x18:"MIFARE Classic 4K",0x09:"MIFARE Mini",
+    0x00:"MIFARE Ultralight / NTAG",0x20:"ISO14443-4 (DESFire/JCOP)",0x28:"JCOP",0x10:"MIFARE Plus"}[s])||"ISO14443-A"; }
+};
+V.nfc={
+  render:function(){
+    var d=(S.serList&&S.serList.length)? S.serList[(S.serSel!=null?S.serSel:0)] : null;
+    var dev=d? '<div class="kv"><span>Reader</span><span>'+esc(d.name)+' · '+d.vidhex+':'+d.pidhex+'</span></div>'
+             : '<div class="hint">'+esc(S.serListMsg||"attach a PN532 on a USB-serial adapter, then Re-scan")+'</div>';
+    var fw=S.nfcFw? '<div class="kv"><span>PN532</span><span style="color:var(--accent)">firmware v'+esc(S.nfcFw)+'</span></div>'
+                  : (S.nfcOpen?'<div class="hint">'+esc(S.nfcMsg||"handshaking with PN532…")+'</div>':'');
+    var tag=S.nfcTag? '<div class="card"><h3>TAG</h3>'+
+        '<div class="kv"><span>UID</span><span style="color:#eafff6">'+esc(S.nfcTag.uid)+'</span></div>'+
+        '<div class="kv"><span>Type</span><span>'+esc(S.nfcTag.type)+'</span></div>'+
+        '<div class="kv"><span>ATQA / SAK</span><span>'+esc(S.nfcTag.atqa)+' / '+esc(S.nfcTag.sak)+'</span></div></div>'
+      : '';
+    var conn=S.nfcOpen
+      ? '<span class="btn sel" data-act="scan">◉ Scan tag</span><span class="btn danger" data-act="disc">■ Disconnect</span>'
+      : '<span class="btn sel" data-act="conn">▶ Connect PN532</span><span class="btn" data-act="scan2">⟳ Re-scan USB</span>';
+    return head("NFC","⊚","13.56 MHz · PN532")+
+      '<div class="card"><h3>READER</h3>'+dev+fw+'<div style="margin-top:4px">'+conn+'</div>'+
+      '<div id="nfcstat" class="hint" style="margin-top:5px">'+esc(S.nfcMsg||"")+'</div></div>'+ tag+
+      '<div class="note">This phone has no NFC chip (verified), so NFC runs through a PN532 reader on the USB-OTG serial port. Connect, then Scan to read a 13.56 MHz tag’s UID and type (ISO14443-A: MIFARE, NTAG, DESFire). Real tag I/O; nothing leaves the phone.</div>';
+  },
+  _buf:[],
+  mounted:function(){ var self=this; this._buf=[];
+    window.__fxSerRx=function(hex){ self._rx(hex); };
+    window.__fxSerOpenCb=function(open,msg){ S.nfcOpen=open; if(!open){ S.nfcFw=null; }
+      S.nfcMsg=open?"PN532 link open — handshaking…":("closed"+(msg?" · "+msg:""));
+      if(open){ setTimeout(function(){ self._init(); },250); } if(S.view==="nfc")draw(); };
+    try{ FXNATIVE.serialList(); }catch(e){ S.serListMsg="serial bridge unavailable"; } },
+  click:function(t){
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act;
+    if(act==="conn"){ this._connect(); }
+    else if(act==="scan2"){ try{ FXNATIVE.serialList(); }catch(e){} }
+    else if(act==="disc"){ try{ FXNATIVE.serialClose(); }catch(e){} }
+    else if(act==="scan"){ this._tx(PN532.frame([0x4A,0x01,0x00])); S.nfcMsg="hold a tag to the PN532…"; var s=document.getElementById("nfcstat"); if(s)s.textContent=S.nfcMsg; }
+  },
+  _connect:function(){ var d=(S.serList&&S.serList.length)? S.serList[(S.serSel!=null?S.serSel:0)]:null;
+    if(!d){ S.nfcMsg="no USB-serial reader found"; draw(); return; }
+    S.nfcMsg="opening PN532 @115200…"; draw();
+    try{ FXNATIVE.serialOpen(d.vid,d.pid,115200); }catch(e){ S.nfcMsg="serial bridge unavailable"; draw(); } },
+  _init:function(){ var self=this;
+    // HSU wake burst, then SAMConfiguration (normal), then GetFirmwareVersion
+    try{ FXNATIVE.serialWriteHex("5555000000000000"); }catch(e){}
+    setTimeout(function(){ self._tx(PN532.frame([0x14,0x01,0x14,0x01])); },60);   // SAMConfiguration
+    setTimeout(function(){ self._tx(PN532.frame([0x02])); },180);                 // GetFirmwareVersion
+  },
+  _tx:function(bytes){ try{ FXNATIVE.serialWriteHex(PN532.toHex(bytes)); }catch(e){} },
+  _rx:function(hex){ var parts=(hex||"").trim().split(/\s+/); for(var i=0;i<parts.length;i++){ var v=parseInt(parts[i],16);
+      if(!isNaN(v))this._buf.push(v&0xff); } this._drain(); },
+  _drain:function(){ var b=this._buf, guard=0;
+    while(b.length>=6 && guard++<40){
+      // find frame preamble 00 00 FF
+      var i=0; while(i+2<b.length && !(b[i]===0&&b[i+1]===0&&b[i+2]===0xFF)) i++;
+      if(i+2>=b.length){ if(b.length>512)this._buf=b=b.slice(-64); return; }
+      if(i>0){ b=this._buf=b.slice(i); }
+      if(b.length<6) return;
+      // ACK 00 00 FF 00 FF 00
+      if(b[3]===0x00 && b[4]===0xFF){ this._buf=b=b.slice(6); continue; }
+      var len=b[3]; var total=6+len+1; // 00 00 FF LEN LCS [TFI+data(len)] DCS 00  -> 5 + len +2
+      total=5+len+2;
+      if(b.length<total){ return; }       // wait for the rest
+      var payload=b.slice(5,5+len);        // [TFI=D5, cmd, data...]
+      this._buf=b=b.slice(total);
+      if(payload[0]===0xD5){ this._handle(payload); }
+    }
+  },
+  _handle:function(p){ var cmd=p[1];
+    if(cmd===0x03){ // GetFirmwareVersion resp: D5 03 IC VER REV SUPPORT
+      S.nfcFw=p[3]+"."+p[4]; S.nfcMsg="PN532 ready — press Scan tag"; if(S.view==="nfc")draw(); }
+    else if(cmd===0x4B){ // InListPassiveTarget resp: D5 4B NbTg [Tg SENS(2) SEL NFCIDlen NFCID...]
+      var nb=p[2];
+      if(!nb){ S.nfcMsg="no tag detected — try again"; var s=document.getElementById("nfcstat"); if(s)s.textContent=S.nfcMsg; return; }
+      var atqa=PN532.toHex([p[4],p[5]]), sak=p[6], idlen=p[7], uid=[];
+      for(var k=0;k<idlen;k++)uid.push(p[8+k]);
+      S.nfcTag={ uid:PN532.toHex(uid).toUpperCase().replace(/(..)(?=.)/g,"$1:"), atqa:atqa, sak:("0"+sak.toString(16)).slice(-2), type:PN532.sak(sak) };
+      S.nfcMsg="tag read ✓"; try{FXNATIVE.vibrate(40);}catch(e){} if(S.view==="nfc")draw(); }
+  },
+  unmounted:function(){ window.__fxSerRx=null; window.__fxSerOpenCb=null; S.nfcOpen=false; S.nfcFw=null; try{ FXNATIVE.serialClose(); }catch(e){} }
+};
+
+/* native -> web serial callbacks (dispatch to whichever view owns the port) */
 window.FXSERIALLIST=function(arr){ S.serList=arr||[]; S.serListMsg=S.serList.length?null:"no USB-serial module found";
   if(S.serSel==null||S.serSel>=S.serList.length)S.serSel=S.serList.length?0:null;
-  if(S.view==="serial")draw(); };
-window.FXSERIAL=function(open,msg){ var was=S.serOpen; S.serOpen=!!open;
-  if(S.view==="serial"){ if(was!==S.serOpen){ draw(); } if(V.serial._append)V.serial._append("sys",(open?"● connected · ":"○ ")+(msg||"")); } };
-window.FXSERIALRX=function(hex,text){ if(S.view!=="serial"||!V.serial._append)return;
-  V.serial._append("rx", V.serial._hex ? hex : (text||"").replace(/\r/g,"")); };
+  if(S.view==="serial"||S.view==="nfc")draw(); };
+window.FXSERIAL=function(open,msg){ S.serOpen=!!open; if(window.__fxSerOpenCb)window.__fxSerOpenCb(!!open,msg||""); };
+window.FXSERIALRX=function(hex,text){ if(window.__fxSerRx)window.__fxSerRx(hex,text); };
 
 /* ---------- Hardware: USB-OTG host, device self-recon, honest sensors, outputs ---------- */
 V.hardware={
@@ -1165,7 +1258,7 @@ V.settings={
 function head(t,ic,tag){return '<div class="vhead"><span class="ico">'+ic+'</span><div>'+
   '<div class="tag">'+tag+'</div><h1>'+t+'</h1></div></div>';}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-var BUILD="2026.11.17·b17", BOOTED=Date.now();
+var BUILD="2026.11.17·b19", BOOTED=Date.now();
 S.pylog=[{t:"FLIPPER X python console — fx.* API ready",c:"sys"}];
 
 function pyEval(src){
