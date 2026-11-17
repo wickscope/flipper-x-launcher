@@ -11,20 +11,48 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.hardware.ConsumerIrManager;
+import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CameraCharacteristics;
+import android.location.GnssStatus;
+import android.location.Location;
+import android.location.LocationManager;
 import android.net.Uri;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
+import android.nfc.NfcAdapter;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.telephony.CellInfo;
+import android.telephony.CellInfoGsm;
+import android.telephony.CellInfoLte;
+import android.telephony.CellInfoWcdma;
+import android.telephony.CellInfoNr;
+import android.telephony.CellInfoCdma;
+import android.telephony.CellIdentityGsm;
+import android.telephony.CellIdentityLte;
+import android.telephony.CellIdentityWcdma;
+import android.telephony.CellIdentityNr;
+import android.telephony.CellSignalStrength;
+import android.telephony.TelephonyManager;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import android.hardware.usb.UsbManager;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbInterface;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -34,6 +62,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * FLIPPER X launcher: a full-screen WebView that IS the phone's home screen.
@@ -77,6 +106,16 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Let the WebView's getUserMedia (camera QR scanner, mic spectrum) actually open hardware.
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(new Runnable() { public void run() {
+                    try { request.grant(request.getResources()); } catch (Exception e) {}
+                }});
+            }
+        });
+
         web.addJavascriptInterface(new RadioBridge(), "FXNATIVE");
         web.setBackgroundColor(0xFF060D0B);
         web.loadUrl("file:///android_asset/flipperx/index.html");
@@ -109,8 +148,13 @@ public class MainActivity extends Activity {
         super.onPause();
         // Lid closed / screen off / backgrounded: halt ALL WebView work (JS, rAF, timers,
         // media decode) so the phone stops heating up while idle or closed.
-        if (web != null) { web.onPause(); web.pauseTimers(); }
+        if (web != null) {
+            try { web.evaluateJavascript("window.__fxStopMedia&&__fxStopMedia();", null); } catch (Exception e) {}
+            web.onPause(); web.pauseTimers();
+        }
         stopBt();
+        stopGnss();
+        try { doTorch(false); } catch (Exception e) {}
     }
 
     @Override
@@ -151,6 +195,7 @@ public class MainActivity extends Activity {
         if (req == REQ_READ) injectPlaylist();
         else if (req == REQ_WIFI) { if (granted) doWifiScan(); else js("window.FXWIFI&&FXWIFI(null,'location permission denied \u2014 Android requires it for Wi-Fi scanning')"); }
         else if (req == REQ_BT)   { if (granted) doBtScan();   else js("window.FXBT&&FXBT(null,'Bluetooth permission denied')"); }
+        else if (req == REQ_CELL) { if (granted) { doCellScan(); } else js("window.FXCELL&&FXCELL(null,'location + phone permission needed for tower recon')"); }
     }
 
     // ---------------- Radio recon bridge (real Wi-Fi + Bluetooth scanning) ----------------
@@ -172,6 +217,286 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void wifiScan() { runOnUiThread(new Runnable(){ public void run(){ startWifi(); }}); }
         @JavascriptInterface public void btScan()   { runOnUiThread(new Runnable(){ public void run(){ startBt(); }}); }
         @JavascriptInterface public void btStop()    { runOnUiThread(new Runnable(){ public void run(){ stopBt(); }}); }
+        // ---- expanded cyber capabilities ----
+        @JavascriptInterface public void cellScan() { runOnUiThread(new Runnable(){ public void run(){ startCell(); }}); }
+        @JavascriptInterface public void gnssStart(){ runOnUiThread(new Runnable(){ public void run(){ startGnss(); }}); }
+        @JavascriptInterface public void gnssStop() { runOnUiThread(new Runnable(){ public void run(){ stopGnss(); }}); }
+        @JavascriptInterface public void usbList()  { runOnUiThread(new Runnable(){ public void run(){ emitUsb(); }}); }
+        @JavascriptInterface public void nfcInfo()  { runOnUiThread(new Runnable(){ public void run(){ emitNfc(); }}); }
+        @JavascriptInterface public void irInfo()   { runOnUiThread(new Runnable(){ public void run(){ emitIr(); }}); }
+        @JavascriptInterface public void irTx(final int freq, final String patternCsv){
+            runOnUiThread(new Runnable(){ public void run(){ doIrTx(freq, patternCsv); }}); }
+        @JavascriptInterface public void sysRecon() { runOnUiThread(new Runnable(){ public void run(){ emitSys(); }}); }
+        @JavascriptInterface public void torch(final boolean on){ runOnUiThread(new Runnable(){ public void run(){ doTorch(on); }}); }
+        @JavascriptInterface public void vibrate(final int ms){ doVibrate(ms); }
+    }
+
+    // ---------------- Cell-tower recon ----------------
+    private static final int REQ_CELL = 53;
+    private void startCell() {
+        boolean loc = Build.VERSION.SDK_INT < 23
+                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean phone = Build.VERSION.SDK_INT < 23
+                || checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
+        if (!loc || !phone) {
+            try { requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.READ_PHONE_STATE}, REQ_CELL); } catch (Exception e) {}
+            return;
+        }
+        doCellScan();
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void doCellScan() {
+        try {
+            TelephonyManager tm = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
+            if (tm == null) { js("window.FXCELL&&FXCELL(null,'no telephony hardware')"); return; }
+            String op = "";
+            try { op = tm.getNetworkOperatorName(); } catch (Exception e) {}
+            List<CellInfo> all = tm.getAllCellInfo();
+            JSONArray arr = new JSONArray();
+            if (all != null) for (CellInfo ci : all) {
+                JSONObject o = new JSONObject();
+                try {
+                    if (ci instanceof CellInfoLte) {
+                        CellInfoLte c = (CellInfoLte) ci; CellIdentityLte id = c.getCellIdentity();
+                        o.put("type","LTE"); o.put("cid", id.getCi()); o.put("tac", id.getTac());
+                        o.put("pci", id.getPci()); o.put("earfcn", id.getEarfcn());
+                        o.put("mcc", safeMccLte(id)); o.put("mnc", safeMncLte(id));
+                        o.put("dbm", c.getCellSignalStrength().getDbm());
+                    } else if (ci instanceof CellInfoWcdma) {
+                        CellInfoWcdma c = (CellInfoWcdma) ci; CellIdentityWcdma id = c.getCellIdentity();
+                        o.put("type","WCDMA"); o.put("cid", id.getCid()); o.put("tac", id.getLac());
+                        o.put("pci", id.getPsc()); o.put("earfcn", id.getUarfcn());
+                        o.put("dbm", c.getCellSignalStrength().getDbm());
+                    } else if (ci instanceof CellInfoGsm) {
+                        CellInfoGsm c = (CellInfoGsm) ci; CellIdentityGsm id = c.getCellIdentity();
+                        o.put("type","GSM"); o.put("cid", id.getCid()); o.put("tac", id.getLac());
+                        o.put("pci", id.getBsic()); o.put("earfcn", id.getArfcn());
+                        o.put("dbm", c.getCellSignalStrength().getDbm());
+                    } else if (Build.VERSION.SDK_INT >= 29 && ci instanceof CellInfoNr) {
+                        CellInfoNr c = (CellInfoNr) ci;
+                        CellIdentityNr id = (CellIdentityNr) c.getCellIdentity();
+                        o.put("type","5G-NR"); o.put("cid", id.getNci()); o.put("tac", id.getTac());
+                        o.put("pci", id.getPci()); o.put("earfcn", id.getNrarfcn());
+                        o.put("dbm", c.getCellSignalStrength().getDbm());
+                    } else if (ci instanceof CellInfoCdma) {
+                        o.put("type","CDMA");
+                        o.put("dbm", ((CellInfoCdma) ci).getCellSignalStrength().getDbm());
+                    } else continue;
+                    o.put("reg", ci.isRegistered());
+                    o.put("op", op);
+                    arr.put(o);
+                } catch (Exception inner) {}
+            }
+            js("window.FXCELL&&FXCELL(" + arr.toString() + ",null)");
+        } catch (SecurityException se) {
+            js("window.FXCELL&&FXCELL(null,'permission denied')");
+        } catch (Exception e) {
+            js("window.FXCELL&&FXCELL(null,'" + esc(e.getMessage()) + "')");
+        }
+    }
+    private static int safeMccLte(CellIdentityLte id){ try{ if(Build.VERSION.SDK_INT>=28){String m=id.getMccString();return m==null?-1:Integer.parseInt(m);} return id.getMcc(); }catch(Exception e){return -1;} }
+    private static int safeMncLte(CellIdentityLte id){ try{ if(Build.VERSION.SDK_INT>=28){String m=id.getMncString();return m==null?-1:Integer.parseInt(m);} return id.getMnc(); }catch(Exception e){return -1;} }
+
+    // ---------------- GNSS / GPS ----------------
+    private LocationManager locMgr;
+    private GnssStatus.Callback gnssCb;
+    private void startGnss() {
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            try { requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_CELL); } catch (Exception e) {}
+            js("window.FXGNSS&&FXGNSS(null,'grant location, then press Start again')");
+            return;
+        }
+        try {
+            locMgr = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            if (locMgr == null) { js("window.FXGNSS&&FXGNSS(null,'no location hardware')"); return; }
+            boolean gpsOn = false;
+            try { gpsOn = locMgr.isProviderEnabled(LocationManager.GPS_PROVIDER); } catch (Exception e) {}
+            if (!gpsOn) { js("window.FXGNSS&&FXGNSS(null,'turn GPS/Location ON in Shield first')"); return; }
+            if (Build.VERSION.SDK_INT >= 24) {
+                if (gnssCb == null) gnssCb = new GnssStatus.Callback() {
+                    @Override public void onSatelliteStatusChanged(GnssStatus st) { emitGnss(st); }
+                };
+                try { locMgr.registerGnssStatusCallback(gnssCb); } catch (SecurityException se) {}
+            }
+            try {
+                locMgr.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 0, gpsListener);
+            } catch (Exception e) {}
+            js("window.FXGNSS&&FXGNSS({sats:0,used:0,fix:false,waiting:true},null)");
+        } catch (SecurityException se) { js("window.FXGNSS&&FXGNSS(null,'permission denied')"); }
+        catch (Exception e) { js("window.FXGNSS&&FXGNSS(null,'" + esc(e.getMessage()) + "')"); }
+    }
+    private final android.location.LocationListener gpsListener = new android.location.LocationListener() {
+        public void onLocationChanged(Location l) { lastFix = l; }
+        public void onProviderEnabled(String p) {}
+        public void onProviderDisabled(String p) {}
+        public void onStatusChanged(String p, int s, Bundle b) {}
+    };
+    private Location lastFix;
+    private void emitGnss(GnssStatus st) {
+        try {
+            int n = st.getSatelliteCount(), used = 0; double cnSum = 0; int cnN = 0;
+            int gps=0,glo=0,gal=0,bds=0,qzss=0,other=0;
+            for (int i=0;i<n;i++){
+                if (st.usedInFix(i)) used++;
+                float cn=st.getCn0DbHz(i); if(cn>0){cnSum+=cn;cnN++;}
+                int c=st.getConstellationType(i);
+                switch(c){case GnssStatus.CONSTELLATION_GPS:gps++;break;
+                    case GnssStatus.CONSTELLATION_GLONASS:glo++;break;
+                    case GnssStatus.CONSTELLATION_GALILEO:gal++;break;
+                    case GnssStatus.CONSTELLATION_BEIDOU:bds++;break;
+                    case GnssStatus.CONSTELLATION_QZSS:qzss++;break;default:other++;}
+            }
+            JSONObject o=new JSONObject();
+            o.put("sats",n); o.put("used",used); o.put("fix",used>=4);
+            o.put("avgcn", cnN>0?Math.round(cnSum/cnN):0);
+            o.put("gps",gps);o.put("glo",glo);o.put("gal",gal);o.put("bds",bds);o.put("qzss",qzss);o.put("other",other);
+            if (lastFix!=null){ o.put("lat",lastFix.getLatitude()); o.put("lon",lastFix.getLongitude());
+                o.put("alt",lastFix.getAltitude()); o.put("acc",lastFix.getAccuracy()); }
+            js("window.FXGNSS&&FXGNSS(" + o.toString() + ",null)");
+        } catch (Exception e) {}
+    }
+    private void stopGnss() {
+        try { if (locMgr!=null){ if(gnssCb!=null&&Build.VERSION.SDK_INT>=24) locMgr.unregisterGnssStatusCallback(gnssCb);
+            locMgr.removeUpdates(gpsListener); } } catch (Exception e) {}
+    }
+
+    // ---------------- USB-OTG host scanner (the backbone of every attachable module) ----------------
+    private void emitUsb() {
+        try {
+            UsbManager um = (UsbManager) getSystemService(Context.USB_SERVICE);
+            JSONArray arr = new JSONArray();
+            if (um != null) {
+                Map<String, UsbDevice> devs = um.getDeviceList();
+                for (UsbDevice d : devs.values()) {
+                    JSONObject o = new JSONObject();
+                    o.put("vid", d.getVendorId()); o.put("pid", d.getProductId());
+                    o.put("vidhex", String.format("%04x", d.getVendorId()));
+                    o.put("pidhex", String.format("%04x", d.getProductId()));
+                    String pn=null, mn=null;
+                    try { pn=d.getProductName(); mn=d.getManufacturerName(); } catch (Exception e) {}
+                    o.put("name", pn==null? d.getDeviceName() : pn);
+                    o.put("maker", mn==null? "" : mn);
+                    o.put("cls", d.getDeviceClass());
+                    int ifc = 0; boolean cdc=false, hid=false;
+                    try { ifc=d.getInterfaceCount();
+                        for (int i=0;i<ifc;i++){ UsbInterface it=d.getInterface(i);
+                            int c=it.getInterfaceClass(); if(c==2||c==10)cdc=true; if(c==3)hid=true; } } catch (Exception e) {}
+                    o.put("ifs", ifc); o.put("serial", cdc); o.put("hid", hid);
+                    o.put("kind", classifyUsb(d.getVendorId(), d.getProductId(), cdc));
+                    arr.put(o);
+                }
+            }
+            js("window.FXUSB&&FXUSB(" + arr.toString() + ",null)");
+        } catch (Exception e) { js("window.FXUSB&&FXUSB(null,'" + esc(e.getMessage()) + "')"); }
+    }
+    /** Name common cyber modules by their USB id so attached hardware is recognised, not guessed. */
+    private static String classifyUsb(int vid, int pid, boolean cdc) {
+        if (vid==0x0bda && (pid==0x2838||pid==0x2832)) return "RTL-SDR (DVB-T dongle)";
+        if (vid==0x1d50 && pid==0x6089) return "HackRF One (SDR)";
+        if (vid==0x1d50 && (pid==0x604b||pid==0x6108)) return "Proxmark3 (RFID)";
+        if (vid==0x072f || vid==0x04e6) return "PC/SC NFC reader (PN532/ACR)";
+        if (vid==0x1a86 && (pid==0x7523||pid==0x5523)) return "CH340 USB-serial (CC1101/GPIO bridge)";
+        if (vid==0x1a86 && pid==0x55d4) return "CH9102 USB-serial";
+        if (vid==0x10c4 && pid==0xea60) return "CP210x USB-serial";
+        if (vid==0x0403) return "FTDI USB-serial";
+        if (vid==0x2341 || vid==0x2a03) return "Arduino (serial firmware)";
+        if (vid==0x303a) return "Espressif ESP32 (USB-serial)";
+        if (cdc) return "USB-serial (CDC-ACM)";
+        return "USB device";
+    }
+
+    // ---------------- NFC presence ----------------
+    private void emitNfc() {
+        try {
+            NfcAdapter na = NfcAdapter.getDefaultAdapter(this);
+            JSONObject o = new JSONObject();
+            o.put("present", na != null);
+            o.put("enabled", na != null && na.isEnabled());
+            js("window.FXNFC&&FXNFC(" + o.toString() + ")");
+        } catch (Exception e) { js("window.FXNFC&&FXNFC({present:false,enabled:false})"); }
+    }
+
+    // ---------------- IR blaster ----------------
+    private void emitIr() {
+        try {
+            ConsumerIrManager cir = (ConsumerIrManager) getSystemService(Context.CONSUMER_IR_SERVICE);
+            JSONObject o = new JSONObject();
+            boolean has = cir != null && cir.hasIrEmitter();
+            o.put("present", has);
+            JSONArray freqs = new JSONArray();
+            if (has) try { for (ConsumerIrManager.CarrierFrequencyRange r : cir.getCarrierFrequencies()) {
+                JSONObject f=new JSONObject(); f.put("min",r.getMinFrequency()); f.put("max",r.getMaxFrequency()); freqs.put(f);
+            } } catch (Exception e) {}
+            o.put("freqs", freqs);
+            js("window.FXIR&&FXIR(" + o.toString() + ",null)");
+        } catch (Exception e) { js("window.FXIR&&FXIR({present:false},'" + esc(e.getMessage()) + "')"); }
+    }
+    private void doIrTx(int freq, String patternCsv) {
+        try {
+            ConsumerIrManager cir = (ConsumerIrManager) getSystemService(Context.CONSUMER_IR_SERVICE);
+            if (cir == null || !cir.hasIrEmitter()) { js("window.FXIRTX&&FXIRTX(false,'no IR emitter on this phone')"); return; }
+            String[] parts = patternCsv.split(",");
+            int[] pat = new int[parts.length]; int n=0;
+            for (String p : parts){ p=p.trim(); if(p.isEmpty())continue; pat[n++]=Integer.parseInt(p); }
+            int[] use = (n==pat.length)?pat:Arrays.copyOf(pat,n);
+            cir.transmit(freq, use);
+            js("window.FXIRTX&&FXIRTX(true,null)");
+        } catch (Exception e) { js("window.FXIRTX&&FXIRTX(false,'" + esc(e.getMessage()) + "')"); }
+    }
+
+    // ---------------- Device self-recon ----------------
+    private void emitSys() {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("model", Build.MODEL); o.put("device", Build.DEVICE); o.put("product", Build.PRODUCT);
+            o.put("manufacturer", Build.MANUFACTURER); o.put("hardware", Build.HARDWARE); o.put("board", Build.BOARD);
+            o.put("soc", (Build.VERSION.SDK_INT>=31? (Build.SOC_MANUFACTURER+" "+Build.SOC_MODEL):Build.HARDWARE));
+            o.put("android", Build.VERSION.RELEASE); o.put("sdk", Build.VERSION.SDK_INT);
+            o.put("abis", Arrays.toString(Build.SUPPORTED_ABIS));
+            o.put("bootloader", Build.BOOTLOADER); o.put("fingerprint", Build.FINGERPRINT);
+            try { TelephonyManager tm=(TelephonyManager)getSystemService(Context.TELEPHONY_SERVICE);
+                if(tm!=null){ o.put("carrier", tm.getNetworkOperatorName());
+                    o.put("sim", tm.getSimOperatorName()); o.put("country", tm.getNetworkCountryIso()); } } catch (Exception e){}
+            try { Intent bi = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+                if (bi!=null){ int t=bi.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,-1);
+                    int v=bi.getIntExtra(BatteryManager.EXTRA_VOLTAGE,-1);
+                    int lvl=bi.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
+                    o.put("batTemp", t>0? (t/10.0):-1); o.put("batMv", v); o.put("batPct", lvl); } } catch (Exception e){}
+            boolean nfc=false; try{ nfc=NfcAdapter.getDefaultAdapter(this)!=null; }catch(Exception e){}
+            boolean ir=false; try{ ConsumerIrManager c=(ConsumerIrManager)getSystemService(Context.CONSUMER_IR_SERVICE); ir=c!=null&&c.hasIrEmitter(); }catch(Exception e){}
+            o.put("nfc", nfc); o.put("ir", ir);
+            o.put("usbHost", getPackageManager().hasSystemFeature(PackageManager.FEATURE_USB_HOST));
+            o.put("telephony", getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY));
+            o.put("camera", getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY));
+            js("window.FXSYS&&FXSYS(" + o.toString() + ")");
+        } catch (Exception e) { js("window.FXSYS&&FXSYS({err:'" + esc(e.getMessage()) + "'})"); }
+    }
+
+    // ---------------- Torch + vibration ----------------
+    private void doTorch(boolean on) {
+        try {
+            CameraManager cm = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            if (cm == null) { js("window.FXTORCH&&FXTORCH(false,'no camera service')"); return; }
+            String flashId = null;
+            for (String id : cm.getCameraIdList()) {
+                Boolean f = cm.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (f != null && f) { flashId = id; break; }
+            }
+            if (flashId == null) { js("window.FXTORCH&&FXTORCH(false,'no flash on this phone')"); return; }
+            cm.setTorchMode(flashId, on);
+            js("window.FXTORCH&&FXTORCH(" + on + ",null)");
+        } catch (Exception e) { js("window.FXTORCH&&FXTORCH(false,'" + esc(e.getMessage()) + "')"); }
+    }
+    private void doVibrate(int ms) {
+        try {
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            if (v == null || !v.hasVibrator()) return;
+            if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+            else v.vibrate(ms);
+        } catch (Exception e) {}
     }
 
     private void startWifi() {

@@ -250,6 +250,7 @@ input.inp.focus,input.focus{border-color:var(--accent)!important;box-shadow:0 0 
   </div>
 </div>
 
+<script src="jsqr.js"></script>
 <script>
 "use strict";
 (function(){
@@ -356,15 +357,15 @@ function paintRadios(){
 
 /* ---------- home modules ---------- */
 var MODS=[
-  {id:"shield", nm:"Shield",   ic:"⬡"},
+  {id:"shield",  nm:"Shield",   ic:"⬡"},
+  {id:"network", nm:"Radio",    ic:"≋"},
+  {id:"scanner", nm:"Scanner",  ic:"⌖"},
+  {id:"rflab",   nm:"RF Lab",   ic:"〰"},
+  {id:"toolkit", nm:"Toolkit",  ic:"⚒"},
+  {id:"wallet",  nm:"Wallet",   ic:"₿"},
   {id:"terminal",nm:"Terminal", ic:"▮"},
-  {id:"toolkit",nm:"Toolkit",  ic:"⚒"},
-  {id:"network", nm:"Network",  ic:"≋"},
-  {id:"comms",  nm:"Comms",    ic:"✉"},
-  {id:"sensors", nm:"Sensors",  ic:"◉"},
-  {id:"diag",   nm:"Diagnostics",ic:"⚙"},
-  {id:"wallet", nm:"Wallet",    ic:"₿"},
-  {id:"music",  nm:"Music",    ic:"♪"},
+  {id:"hardware",nm:"Hardware", ic:"⚙"},
+  {id:"music",   nm:"Music",    ic:"♪"},
 ];
 
 /* ---------- views ---------- */
@@ -580,32 +581,73 @@ V.toolkit={
     return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20); }
 };
 
-/* ---------- Network: REAL Wi-Fi + Bluetooth scanning via the native bridge ---------- */
+/* ---------- Radio: REAL Wi-Fi / Bluetooth / Cell-tower / GNSS recon ---------- */
 V.network={
+  _tab:"wifi",
+  _tabs:function(){
+    var t=this._tab, mk=function(id,lbl,n){return '<span class="btn'+(t===id?' sel':'')+'" data-tab="'+id+'">'+lbl+(n?' '+n:'')+'</span>';};
+    return '<div style="line-height:2">'+
+      mk("wifi","Wi-Fi",(S.wifiList&&S.wifiList.length)||"")+
+      mk("bt","BT",(S.btList&&S.btList.length)||"")+
+      mk("cell","Cell",(S.cellList&&S.cellList.length)||"")+
+      mk("gnss","GNSS",(S.gnss&&S.gnss.sats)||"")+'</div>';
+  },
   render:function(){
-    var wifi=(S.wifiList&&S.wifiList.length)? S.wifiList.map(function(a){
+    var t=this._tab, body="";
+    if(t==="wifi"){
+      var wifi=(S.wifiList&&S.wifiList.length)? S.wifiList.map(function(a){
+        var sec=a.sec==="open"?'<span style="color:var(--warn)">open</span>':a.sec;
         return '<div class="row"><span class="ri">≈</span><div class="rt"><div class="t1">'+esc(a.ssid)+'</div>'+
-          '<div class="t2">'+esc(a.bssid)+' · ch'+a.chan+' · '+a.sec+'</div></div><span class="rv">'+a.rssi+'</span></div>';}).join("")
-      : '<div class="hint">'+esc(S.wifiMsg||'press Scan to list real networks')+'</div>';
-    var bt=(S.btList&&S.btList.length)? S.btList.map(function(d){
+          '<div class="t2">'+esc(a.bssid)+' · ch'+a.chan+' · '+sec+'</div></div><span class="rv">'+a.rssi+'</span></div>';}).join("")
+      : '<div class="hint">'+esc(S.wifiMsg||'press Scan to list real networks around you')+'</div>';
+      body='<span class="btn sel" data-act="wifi">⟳ Scan Wi-Fi</span>'+wifi;
+    } else if(t==="bt"){
+      var bt=(S.btList&&S.btList.length)? S.btList.map(function(d){
         return '<div class="row"><span class="ri">◉</span><div class="rt"><div class="t1">'+esc(d.name)+'</div>'+
           '<div class="t2">'+esc(d.mac)+'</div></div><span class="rv">'+d.rssi+'</span></div>';}).join("")
-      : '<div class="hint">'+esc(S.btMsg||'press Scan to list real devices')+'</div>';
-    return head("NETWORK","≫","RADIO RECON")+
-      '<div class="card"><h3>WI-FI'+(S.wifiList&&S.wifiList.length?' ('+S.wifiList.length+')':'')+'</h3>'+
-      '<span class="btn sel" data-act="wifi">⟳ Scan Wi-Fi</span>'+wifi+'</div>'+
-      '<div class="card"><h3>BLUETOOTH'+(S.btList&&S.btList.length?' ('+S.btList.length+')':'')+'</h3>'+
-      '<span class="btn" data-act="bt">⟳ Scan Bluetooth</span>'+bt+'</div>'+
-      '<div class="note">Live radios around you — real SSIDs, MACs, channels, signal and nearby Bluetooth devices. Android requires the location permission to scan; nothing leaves the phone (no internet). Monitor-mode / injection aren’t possible on this chipset.</div>';
+      : '<div class="hint">'+esc(S.btMsg||'press Scan — finds nearby devices over ~12s')+'</div>';
+      body='<span class="btn sel" data-act="bt">⟳ Scan Bluetooth</span>'+bt;
+    } else if(t==="cell"){
+      var cell=(S.cellList&&S.cellList.length)? S.cellList.map(function(c){
+        var id=(c.cid!=null&&c.cid>=0)?('CID '+c.cid):'';
+        var l2=[c.type,id,(c.tac!=null&&c.tac>=0?'TAC '+c.tac:''),(c.earfcn?'EARFCN '+c.earfcn:'')].filter(Boolean).join(' · ');
+        var l3=[(c.mcc>0?'MCC '+c.mcc:''),(c.mnc>=0?'MNC '+c.mnc:''),(c.pci!=null?'PCI '+c.pci:'')].filter(Boolean).join(' · ');
+        return '<div class="row"><span class="ri">'+(c.reg?'▲':'△')+'</span><div class="rt"><div class="t1">'+esc(c.op||c.type)+(c.reg?' <span style="color:var(--accent)">·serving</span>':'')+'</div>'+
+          '<div class="t2">'+esc(l2)+(l3?' · '+esc(l3):'')+'</div></div><span class="rv">'+(c.dbm||'')+'</span></div>';}).join("")
+      : '<div class="hint">'+esc(S.cellMsg||'press Scan to map the cell towers your SIM can see')+'</div>';
+      body='<span class="btn sel" data-act="cell">⟳ Scan towers</span>'+cell;
+    } else {
+      var g=S.gnss, gbody;
+      if(!g){ gbody='<div class="hint">'+esc(S.gnssMsg||'turn GPS ON in Shield, then Start — live satellites')+'</div>'; }
+      else {
+        gbody='<div class="kv"><span>Satellites in view</span><span class="big" style="font-size:19px">'+g.sats+'</span></div>'+
+          '<div class="kv"><span>Used in fix</span><span>'+g.used+(g.fix?' <span style="color:var(--accent)">·FIX</span>':'')+'</span></div>'+
+          '<div class="kv"><span>Avg C/N0</span><span>'+(g.avgcn||0)+' dB-Hz</span></div>'+
+          '<div class="t2" style="margin:5px 0">GPS '+(g.gps||0)+' · GLO '+(g.glo||0)+' · GAL '+(g.gal||0)+' · BDS '+(g.bds||0)+(g.qzss?' · QZSS '+g.qzss:'')+'</div>'+
+          (g.lat!=null?'<div class="kv"><span>Position</span><span>'+g.lat.toFixed(5)+', '+g.lon.toFixed(5)+'</span></div>'+
+            '<div class="kv"><span>Alt / acc</span><span>'+Math.round(g.alt)+' m · ±'+Math.round(g.acc)+' m</span></div>':
+            '<div class="hint">acquiring fix… (needs open sky)</div>');
+      }
+      body='<span class="btn sel" data-act="gnss">▶ Start</span><span class="btn" data-act="gnssstop">■ Stop</span>'+gbody;
+    }
+    return head("RADIO","≫","RECON")+ this._tabs()+
+      '<div class="card">'+body+'</div>'+
+      '<div class="note">Everything here is live and real — SSIDs, MACs, tower IDs, satellites. Android requires location permission to scan radios. Nothing leaves the phone (no internet). Monitor-mode / packet injection aren’t possible on the MT6739 Wi-Fi chip.</div>';
   },
   click:function(t){
-    var a=t.closest("[data-act]"); if(!a)return;
-    if(a.dataset.act==="wifi"){ S.wifiList=null; S.wifiMsg="scanning…"; draw();
-      try{ FXNATIVE.wifiScan(); }catch(e){ S.wifiMsg="native radio bridge not available"; draw(); } }
-    if(a.dataset.act==="bt"){ S.btList=[]; S.btMsg="scanning… (finds devices over ~12s)"; draw();
-      try{ FXNATIVE.btScan(); }catch(e){ S.btMsg="native radio bridge not available"; draw(); } }
+    var tb=t.closest("[data-tab]"); if(tb){ this._tab=tb.dataset.tab; S._navIdx=0; draw(); return; }
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act;
+    if(act==="wifi"){ S.wifiList=null; S.wifiMsg="scanning…"; draw();
+      try{ FXNATIVE.wifiScan(); }catch(e){ S.wifiMsg="native radio bridge unavailable"; draw(); } }
+    else if(act==="bt"){ S.btList=[]; S.btMsg="scanning… (~12s)"; draw();
+      try{ FXNATIVE.btScan(); }catch(e){ S.btMsg="native radio bridge unavailable"; draw(); } }
+    else if(act==="cell"){ S.cellList=null; S.cellMsg="scanning towers…"; draw();
+      try{ FXNATIVE.cellScan(); }catch(e){ S.cellMsg="native radio bridge unavailable"; draw(); } }
+    else if(act==="gnss"){ S.gnssMsg="starting GPS…"; draw();
+      try{ FXNATIVE.gnssStart(); }catch(e){ S.gnssMsg="native radio bridge unavailable"; draw(); } }
+    else if(act==="gnssstop"){ try{ FXNATIVE.gnssStop(); }catch(e){} S.gnss=null; S.gnssMsg="stopped"; draw(); }
   },
-  unmounted:function(){ try{ FXNATIVE.btStop(); }catch(e){} }
+  unmounted:function(){ try{ FXNATIVE.btStop(); }catch(e){} try{ FXNATIVE.gnssStop(); }catch(e){} }
 };
 /* native -> web callbacks */
 window.FXWIFI=function(arr,err){
@@ -619,8 +661,214 @@ window.FXBT=function(obj,err){
   if(!S.btList)S.btList=[];
   var hit=false; for(var i=0;i<S.btList.length;i++) if(S.btList[i].mac===obj.mac){ S.btList[i]=obj; hit=true; break; }
   if(!hit)S.btList.push(obj);
-  S.btMsg=null; if(S.view==="network")draw();
+  S.btMsg=null; if(S.view==="network" && V.network._tab==="bt")draw();
 };
+window.FXCELL=function(arr,err){
+  if(err){ S.cellMsg=err; S.cellList=null; }
+  else { S.cellList=(arr||[]).slice().sort(function(a,b){return (b.reg?1:0)-(a.reg?1:0)||(b.dbm||-999)-(a.dbm||-999);});
+    S.cellMsg=S.cellList.length?null:"no towers reported (airplane mode / no SIM?)"; }
+  if(S.view==="network" && V.network._tab==="cell")draw();
+};
+window.FXGNSS=function(obj,err){
+  if(err){ S.gnssMsg=err; S.gnss=null; }
+  else if(obj&&obj.waiting){ S.gnssMsg="GPS on — acquiring satellites…"; }
+  else { S.gnss=obj; S.gnssMsg=null; }
+  if(S.view==="network" && V.network._tab==="gnss")draw();
+};
+
+/* ---------- media manager: keeps camera/mic from cooking the phone ---------- */
+window.__fxMedia={stream:null,raf:null,actx:null,timer:null};
+window.__fxStopMedia=function(){ var M=window.__fxMedia;
+  try{ if(M.raf)cancelAnimationFrame(M.raf); }catch(e){} M.raf=null;
+  try{ if(M.timer)clearInterval(M.timer); }catch(e){} M.timer=null;
+  try{ if(M.stream)M.stream.getTracks().forEach(function(t){t.stop();}); }catch(e){} M.stream=null;
+  try{ if(M.actx&&M.actx.state!=="closed")M.actx.close(); }catch(e){} M.actx=null;
+};
+
+/* ---------- Scanner: REAL camera QR/barcode + mic RF/ultrasonic spectrum ---------- */
+V.scanner={
+  _tab:"cam",
+  render:function(){
+    var t=this._tab;
+    var tabs='<div style="line-height:2">'+
+      '<span class="btn'+(t==="cam"?' sel':'')+'" data-tab="cam">⌖ Camera</span>'+
+      '<span class="btn'+(t==="audio"?' sel':'')+'" data-tab="audio">≋ Spectrum</span></div>';
+    if(t==="cam"){
+      return head("SCANNER","⌖","OPTICAL")+tabs+
+        '<div class="card" style="padding:7px"><canvas id="scancv" style="width:100%;height:150px;background:#000;border-radius:6px;display:block"></canvas>'+
+        '<div id="scanout" class="np" style="margin-top:7px;white-space:normal">'+esc(S.scanRes||"point the camera at a QR code or barcode")+'</div>'+
+        '<span class="btn sel" data-act="camstart">▶ Start camera</span><span class="btn" data-act="camstop">■ Stop</span>'+
+        (S.scanRes?'<span class="btn" data-act="camcopy">⧉ Copy</span>':'')+'</div>'+
+        '<div class="note">Decodes QR + common barcodes entirely on-device. Nothing is uploaded. The camera light stays off until you press Start and shuts off when you leave.</div>';
+    }
+    return head("SCANNER","≋","RF / AUDIO")+tabs+
+      '<div class="card" style="padding:7px"><canvas id="spcv" style="width:100%;height:120px;background:#000;border-radius:6px;display:block"></canvas>'+
+      '<div id="spout" class="np" style="margin-top:7px">'+esc(S.spMsg||"press Start — live microphone spectrum")+'</div>'+
+      '<span class="btn sel" data-act="spstart">▶ Start</span><span class="btn" data-act="spstop">■ Stop</span></div>'+
+      '<div class="note">Live audio spectrum from the mic (20 Hz–~22 kHz). Flags ultrasonic 18–22 kHz tones — the band tracking beacons and some store sensors hide in. On-device only.</div>';
+  },
+  mounted:function(){ /* don’t auto-start hardware; wait for the button (heat) */ this._paintIdle(); },
+  _paintIdle:function(){ /* nothing live until Start */ },
+  click:function(t){
+    var tb=t.closest("[data-tab]"); if(tb){ window.__fxStopMedia(); this._tab=tb.dataset.tab; S._navIdx=0; draw(); return; }
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act;
+    if(act==="camstart"){ this._startCam(); }
+    else if(act==="camstop"){ window.__fxStopMedia(); S.spMsg=null; }
+    else if(act==="camcopy"){ try{navigator.clipboard&&navigator.clipboard.writeText(S.scanRes||"");}catch(e){} }
+    else if(act==="spstart"){ this._startAudio(); }
+    else if(act==="spstop"){ window.__fxStopMedia(); }
+  },
+  _startCam:function(){
+    window.__fxStopMedia();
+    var cv=document.getElementById("scancv"); if(!cv)return; var cx=cv.getContext("2d");
+    var vid=document.createElement("video"); vid.setAttribute("playsinline",""); vid.muted=true;
+    var det=null; try{ if("BarcodeDetector" in window) det=new BarcodeDetector(); }catch(e){}
+    navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false}).then(function(st){
+      window.__fxMedia.stream=st; vid.srcObject=st; vid.play();
+      cv.width=240; cv.height=180;
+      function frame(){ window.__fxMedia.raf=requestAnimationFrame(frame);
+        if(vid.readyState<2)return;
+        cx.drawImage(vid,0,0,cv.width,cv.height); }
+      frame();
+      window.__fxMedia.timer=setInterval(function(){
+        if(vid.readyState<2)return;
+        try{
+          if(det){ det.detect(cv).then(function(codes){ if(codes&&codes.length){ V.scanner._hit(codes[0].rawValue); } }).catch(function(){}); }
+          else if(window.jsQR){ var img=cx.getImageData(0,0,cv.width,cv.height);
+            var q=jsQR(img.data,cv.width,cv.height); if(q&&q.data){ V.scanner._hit(q.data); } }
+          else { var o=document.getElementById("scanout"); if(o)o.textContent="no decoder available"; }
+        }catch(e){}
+      },260);
+    }).catch(function(e){ var o=document.getElementById("scanout"); if(o)o.textContent="camera error: "+e.message; });
+  },
+  _hit:function(v){ if(!v||v===S.scanRes)return; S.scanRes=v; try{FXNATIVE.vibrate(40);}catch(e){}
+    var o=document.getElementById("scanout"); if(o)o.textContent="▸ "+v; },
+  _startAudio:function(){
+    window.__fxStopMedia();
+    var cv=document.getElementById("spcv"); if(!cv)return; var cx=cv.getContext("2d");
+    navigator.mediaDevices.getUserMedia({audio:true,video:false}).then(function(st){
+      window.__fxMedia.stream=st;
+      var AC=window.AudioContext||window.webkitAudioContext, ac=new AC(); window.__fxMedia.actx=ac;
+      var src=ac.createMediaStreamSource(st), an=ac.createAnalyser(); an.fftSize=1024; src.connect(an);
+      var bins=an.frequencyBinCount, data=new Uint8Array(bins), sr=ac.sampleRate;
+      cv.width=240; cv.height=120;
+      function draw(){ window.__fxMedia.raf=requestAnimationFrame(draw);
+        an.getByteFrequencyData(data);
+        cx.fillStyle="#000"; cx.fillRect(0,0,cv.width,cv.height);
+        var bw=cv.width/bins, peak=0,pi=0;
+        for(var i=0;i<bins;i++){ var h=data[i]/255*cv.height; if(data[i]>peak){peak=data[i];pi=i;}
+          cx.fillStyle="rgba(43,212,138,"+(0.25+data[i]/400)+")"; cx.fillRect(i*bw,cv.height-h,Math.max(1,bw-0.3),h); }
+        var pf=Math.round(pi*sr/2/bins);
+        var ultra=pf>=18000&&peak>40;
+        if(ultra){ cx.fillStyle="rgba(226,86,74,.9)"; cx.fillRect(0,0,cv.width,4); }
+        var o=document.getElementById("spout");
+        if(o)o.textContent=(peak>8?("peak "+pf+" Hz"+(ultra?"  ⚠ ULTRASONIC BEACON":"")):"listening…");
+      }
+      draw();
+    }).catch(function(e){ var o=document.getElementById("spout"); if(o)o.textContent="mic error: "+e.message; });
+  },
+  unmounted:function(){ window.__fxStopMedia(); }
+};
+
+/* ---------- RF Lab: onboard IR (standalone) + attachable OTG modules (real USB detection) ---------- */
+V.rflab={
+  render:function(){
+    var ir=S.ir;
+    var irCard;
+    if(ir&&ir.present){
+      irCard='<div class="card"><h3>INFRARED · ONBOARD EMITTER <span style="color:var(--accent)">PRESENT</span></h3>'+
+        '<div class="hint">This phone has a real IR blaster — it can act as a standalone universal remote (TVs, ACs, projectors). Carrier bands: '+
+        ((ir.freqs&&ir.freqs.length)?ir.freqs.map(function(f){return (f.min/1000|0)+'–'+(f.max/1000|0)+'kHz';}).join(', '):'default')+'.</div>'+
+        '<span class="btn sel" data-act="irtest">▶ Test pulse (38 kHz)</span>'+
+        '<div id="irout" class="hint" style="margin-top:5px">'+esc(S.irMsg||"")+'</div></div>';
+    } else if(ir){
+      irCard='<div class="card"><h3>INFRARED · NO ONBOARD EMITTER</h3>'+
+        '<div class="hint">This phone has no IR blaster, so IR is an <b style="color:var(--accent2)">attachable</b> capability: plug a USB-OTG IR transceiver (e.g. an IR-capable CH340/ESP board) and it appears under modules below.</div></div>';
+    } else {
+      irCard='<div class="card"><div class="hint">checking IR emitter…</div></div>';
+    }
+    function mod(name,desc,ids){
+      var hit=null;
+      if(S.usbList) for(var i=0;i<S.usbList.length;i++){ var k=(S.usbList[i].kind||"");
+        for(var j=0;j<ids.length;j++) if(k.indexOf(ids[j])>=0){ hit=S.usbList[i]; break; } if(hit)break; }
+      var status=hit?'<span class="pill on">DETECTED</span>':'<span class="pill off">not attached</span>';
+      return '<div class="row"><span class="ri">'+(hit?'◉':'○')+'</span><div class="rt"><div class="t1">'+esc(name)+' '+status+'</div>'+
+        '<div class="t2">'+esc(hit?(hit.kind+' · '+hit.vidhex+':'+hit.pidhex):desc)+'</div></div></div>';
+    }
+    return head("RF LAB","〰","SUB-GHZ · RFID · SDR")+ irCard+
+      '<div class="card"><h3>ATTACHABLE MODULES (USB-OTG)</h3>'+
+      mod("Sub-GHz · CC1101","433/315/868 MHz over a CH340/CP210x serial bridge",["CH340","CP210x","CH9102","FTDI","CC1101","Arduino","ESP32"])+
+      mod("RFID / NFC · PN532","125 kHz & 13.56 MHz read/write over USB",["PN532","PC/SC","Proxmark","ACR"])+
+      mod("SDR · RTL-SDR","24–1700 MHz receive (spectrum, ADS-B, POCSAG)",["RTL-SDR","HackRF","SDR"])+
+      '<span class="btn sel" data-act="rescan">⟳ Re-scan USB</span></div>'+
+      '<div class="note">Modules light up here the instant you plug them into the USB-C OTG port — this is real hardware detection, not a placeholder. Two-way serial control of a detected module arrives in the next build; the attach + identify path is live now.</div>';
+  },
+  mounted:function(){ try{ FXNATIVE.irInfo(); }catch(e){} try{ FXNATIVE.usbList(); }catch(e){} },
+  click:function(t){
+    var a=t.closest("[data-act]"); if(!a)return;
+    if(a.dataset.act==="rescan"){ try{ FXNATIVE.usbList(); }catch(e){} }
+    else if(a.dataset.act==="irtest"){ S.irMsg="transmitting…"; var o=document.getElementById("irout"); if(o)o.textContent="transmitting…";
+      try{ FXNATIVE.irTx(38000,"9000,4500,560,560,560,1690,560,560,560,1690,560,1690,560,560,560,40000"); }catch(e){ if(o)o.textContent="bridge unavailable"; } }
+  }
+};
+
+/* ---------- Hardware: USB-OTG host, device self-recon, honest sensors, outputs ---------- */
+V.hardware={
+  render:function(){
+    var s=S.sys;
+    var dev=s? '<div class="kv"><span>Model</span><span>'+esc(s.model||"—")+'</span></div>'+
+        '<div class="kv"><span>SoC / board</span><span>'+esc((s.soc||s.hardware||"")+' · '+(s.board||""))+'</span></div>'+
+        '<div class="kv"><span>Android</span><span>'+esc(s.android||"")+' · API '+(s.sdk||"")+'</span></div>'+
+        '<div class="kv"><span>ABIs</span><span style="font-size:10px">'+esc(s.abis||"")+'</span></div>'+
+        (s.carrier?'<div class="kv"><span>Carrier</span><span>'+esc(s.carrier)+(s.country?' ('+esc(s.country.toUpperCase())+')':'')+'</span></div>':'')+
+        (s.batTemp>0?'<div class="kv"><span>Battery</span><span>'+s.batPct+'% · '+s.batTemp+'°C · '+(s.batMv/1000).toFixed(2)+'V</span></div>':'')+
+        '<div class="kv"><span>Onboard radios</span><span>'+(s.nfc?'NFC ':'')+(s.ir?'IR ':'')+(s.telephony?'Cell ':'')+(s.camera?'Cam':'')+'</span></div>'
+      : '<div class="hint">reading device…</div>';
+    var usb=(S.usbList&&S.usbList.length)? S.usbList.map(function(d){
+        return '<div class="row"><span class="ri">⊐</span><div class="rt"><div class="t1">'+esc(d.kind)+'</div>'+
+          '<div class="t2">'+esc((d.name||"")+' · '+d.vidhex+':'+d.pidhex+(d.serial?' · serial':'')+(d.hid?' · HID':''))+'</div></div></div>';}).join("")
+      : '<div class="hint">'+esc(S.usbMsg||"nothing attached — plug a module into the USB-C OTG port and re-scan")+'</div>';
+    return head("HARDWARE","⚙","DEVICE & OTG")+
+      '<div class="card"><h3>DEVICE RECON</h3>'+dev+'</div>'+
+      '<div class="card"><h3>USB-OTG'+(S.usbList&&S.usbList.length?' ('+S.usbList.length+')':'')+'</h3>'+
+      '<span class="btn sel" data-act="usb">⟳ Scan USB</span>'+usb+'</div>'+
+      '<div class="card"><h3>OUTPUTS</h3>'+
+      '<span class="btn" data-act="torch">🔦 Torch</span><span class="btn" data-act="strobe">⚡ Strobe</span>'+
+      '<span class="btn" data-act="buzz">📳 Buzz</span><span class="btn" data-act="tone">♪ Tone</span>'+
+      '<div id="hwout" class="hint" style="margin-top:5px">'+esc(S.hwMsg||"")+'</div></div>'+
+      '<div class="card"><h3>SENSORS (ONBOARD)</h3>'+
+      '<div class="kv"><span>Barometer / SAR</span><span style="color:var(--accent)">yes</span></div>'+
+      '<div class="kv"><span>Accel / gyro / mag</span><span style="color:var(--dim)">none</span></div>'+
+      '<div class="hint">Verified against the phone: only 2 hardware sensors exist, so a compass/level/motion meter are physically impossible here — FLIPPER X won’t fake them.</div></div>';
+  },
+  mounted:function(){ try{ FXNATIVE.sysRecon(); }catch(e){} try{ FXNATIVE.usbList(); }catch(e){} },
+  _torchOn:false,
+  click:function(t){
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act, o=document.getElementById("hwout");
+    if(act==="usb"){ S.usbList=null; S.usbMsg="scanning…"; draw(); try{ FXNATIVE.usbList(); }catch(e){ S.usbMsg="bridge unavailable"; draw(); } }
+    else if(act==="torch"){ this._torchOn=!this._torchOn; try{ FXNATIVE.torch(this._torchOn); }catch(e){} if(o)o.textContent=this._torchOn?"torch ON":"torch off"; }
+    else if(act==="strobe"){ this._strobe(); }
+    else if(act==="buzz"){ try{ FXNATIVE.vibrate(300); }catch(e){} if(o)o.textContent="buzz"; }
+    else if(act==="tone"){ this._tone(); if(o)o.textContent="440 Hz tone"; }
+  },
+  _strobe:function(){ var self=this,n=0,on=false;
+    if(self._st)clearInterval(self._st);
+    self._st=setInterval(function(){ on=!on; try{FXNATIVE.torch(on);}catch(e){} if(++n>=16){clearInterval(self._st);try{FXNATIVE.torch(false);}catch(e){}} },120); },
+  _tone:function(){ try{ var AC=window.AudioContext||window.webkitAudioContext, ac=new AC();
+    var o=ac.createOscillator(),g=ac.createGain(); o.frequency.value=440; g.gain.value=0.0001; o.connect(g); g.connect(ac.destination); o.start();
+    g.gain.exponentialRampToValueAtTime(0.25,ac.currentTime+0.05); g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+0.8); o.stop(ac.currentTime+0.9);
+  }catch(e){} },
+  unmounted:function(){ try{ if(this._torchOn){FXNATIVE.torch(false);this._torchOn=false;} }catch(e){} try{ if(this._st)clearInterval(this._st); }catch(e){} }
+};
+
+/* native -> web callbacks for the new modules */
+window.FXUSB=function(arr,err){ if(err){ S.usbMsg=err; S.usbList=null; } else { S.usbList=arr||[]; S.usbMsg=S.usbList.length?null:"nothing attached"; }
+  if(S.view==="hardware"||S.view==="rflab")draw(); };
+window.FXNFC=function(o){ S.nfc=o; if(S.view==="rflab")draw(); };
+window.FXIR=function(o,err){ S.ir=o||{present:false}; if(S.view==="rflab")draw(); };
+window.FXIRTX=function(ok,err){ S.irMsg=ok?"sent ✓":("failed: "+(err||"")); var e=document.getElementById("irout"); if(e)e.textContent=S.irMsg; };
+window.FXSYS=function(o){ S.sys=o; if(S.view==="hardware")draw(); };
+window.FXTORCH=function(on,err){ if(err){ var e=document.getElementById("hwout"); if(e)e.textContent=err; } };
 
 V.comms={
   render:function(){
@@ -836,7 +1084,7 @@ V.settings={
 function head(t,ic,tag){return '<div class="vhead"><span class="ico">'+ic+'</span><div>'+
   '<div class="tag">'+tag+'</div><h1>'+t+'</h1></div></div>';}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-var BUILD="2026.11.15", BOOTED=Date.now();
+var BUILD="2026.11.17·b16", BOOTED=Date.now();
 S.pylog=[{t:"FLIPPER X python console — fx.* API ready",c:"sys"}];
 
 function pyEval(src){
@@ -953,7 +1201,7 @@ window.FXSOFT=function(side){
 
 /* screen off -> stop all animation; screen on / lid reopen -> show the shark cover screen */
 document.addEventListener("visibilitychange",function(){
-  if(document.hidden){ fxSync(); return; }
+  if(document.hidden){ try{window.__fxStopMedia&&window.__fxStopMedia();}catch(e){} fxSync(); return; }
   if(elBoot.classList.contains("hidden") && elIdle.classList.contains("hidden")){ showIdle(); }
   fxSync();
 });
@@ -990,7 +1238,7 @@ function updateIdle(){ var d=new Date();
   var np=document.getElementById("idle-np"),tr=(S.playing!=null)?S.playlist[S.playing]:null;
   np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
-function showIdle(){ S.locked=true; S.pinBuf=""; S.wseed=null; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
+function showIdle(){ try{window.__fxStopMedia&&window.__fxStopMedia();}catch(e){} S.locked=true; S.pinBuf=""; S.wseed=null; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
 window.FXIDLE=function(){ try{ if(elBoot.classList.contains("hidden")) showIdle(); }catch(e){} };
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
