@@ -516,6 +516,19 @@ function fxEntropyToMnemonic(bytes){
   var m=[]; for(var i=0;i<bits.length/11;i++) m.push(BIP39WORDS[parseInt(bits.substr(i*11,11),2)]);
   return m;
 }
+/* lazy-load the heavy crypto libs only when the wallet needs them (keeps boot light on the MT6739) */
+function fxLoadLibs(cb){
+  var need=[]; if(typeof window.ethers==="undefined")need.push("ethers.umd.min.js");
+  if(typeof window.qrcode==="undefined")need.push("qrcode.js");
+  if(!need.length){ cb(); return; }
+  var i=0; (function nx(){ if(i>=need.length){ cb(); return; }
+    var s=document.createElement("script"); s.src=need[i++];
+    s.onload=nx; s.onerror=function(){ cb("err"); }; document.head.appendChild(s);
+  })();
+}
+function fxQrSvg(text){ try{ var q=qrcode(0,"M"); q.addData(text); q.make();
+  return q.createSvgTag({cellSize:3,margin:2,scalable:true}); }catch(e){ return '<div class="hint">QR unavailable</div>'; } }
+
 /* ---------- Wallet: offline BIP39 cold-storage seed generator ---------- */
 V.wallet={
   render:function(){
@@ -523,18 +536,61 @@ V.wallet={
     var seed = w ? '<div class="card"><h3>SEED — WRITE IT DOWN, IN ORDER</h3><div style="font-size:12px;line-height:1.9;color:#eafff6">'+
       w.map(function(word,i){return '<span style="display:inline-block;width:50%">'+'<span style="color:var(--dim)">'+(i+1)+'.</span> '+esc(word)+'</span>';}).join("")+'</div></div>'
       : '<div class="card"><div class="hint">Generate a brand-new wallet seed entirely offline. This phone has no internet permission, so the keys are born air-gapped and never leave it — real cold storage.</div></div>';
+    // ---- phase 2: receive addresses + QR, derived from the on-screen seed (RAM only) ----
+    var recv="";
+    if(w){
+      if(S.waddr){
+        function arow(sym,label,addr,which){
+          var qr=(S.wqr===which)?('<div style="text-align:center;margin-top:6px"><div style="background:#fff;padding:7px;display:inline-block;border-radius:6px">'+fxQrSvg(addr)+'</div></div>'):'';
+          return '<div class="card"><h3>'+sym+' '+label+' — RECEIVE</h3>'+
+            '<div class="inp" data-act="cp_'+which+'" style="word-break:break-all;color:var(--accent2);font-size:11px">'+esc(addr)+'</div>'+
+            '<span class="btn" data-act="qr_'+which+'">'+(S.wqr===which?'▾ Hide QR':'▦ Show QR')+'</span>'+
+            '<span class="btn" data-act="cp_'+which+'">⧉ Copy</span>'+qr+'</div>';
+        }
+        recv=arow("₿","Bitcoin (legacy)",S.waddr.btc,"btc")+arow("Ξ","Ethereum",S.waddr.eth,"eth");
+      } else {
+        recv='<div class="card"><h3>RECEIVE ADDRESSES</h3>'+
+          (S.wderiving?'<div class="hint">deriving BTC + ETH addresses…</div>'
+            :'<span class="btn sel" data-act="derive">▸ Derive BTC + ETH receive addresses</span>')+
+          (S.wderr?'<div class="note">'+esc(S.wderr)+'</div>':'')+
+          '<div class="hint" style="margin-top:5px">Public receive addresses only — safe to share. Derived on-device from the seed (BIP44 m/44’/0’/0’/0/0 &amp; m/44’/60’/0’/0/0). Private keys never leave RAM or appear on screen.</div></div>';
+      }
+    }
     return head("WALLET","₿","COLD STORAGE")+ seed +
       '<div class="card"><span class="btn sel" data-act="gen24">⚡ New 24-word seed</span>'+
       '<span class="btn" data-act="gen12">12-word</span>'+
-      (w?'<span class="btn danger" data-act="clear">✕ Wipe from screen</span>':'')+'</div>'+
+      (w?'<span class="btn danger" data-act="clear">✕ Wipe from screen</span>':'')+'</div>'+ recv+
       '<div class="note">These words ARE the wallet. Write them on paper in order; anyone who sees them owns the funds, and if you lose them the money is gone. Never photograph them or type them anywhere online. Import into any BIP39 wallet (MetaMask, Ledger, Trezor…) to use. FLIPPER X never stores or sends them — locking the phone wipes them from memory.</div>';
   },
   click:function(t){
-    var a=t.closest("[data-act]"); if(!a)return;
-    if(a.dataset.act==="clear"){ S.wseed=null; draw(); return; }
-    var n=a.dataset.act==="gen12"?16:32;
-    var ent=new Uint8Array(n); crypto.getRandomValues(ent);
-    S.wseed=fxEntropyToMnemonic(ent); S._navIdx=0; draw();
+    var a=t.closest("[data-act]"); if(!a)return; var act=a.dataset.act;
+    if(act==="clear"){ S.wseed=null; S.waddr=null; S.wqr=null; draw(); return; }
+    if(act==="gen24"||act==="gen12"){ var n=act==="gen12"?16:32;
+      var ent=new Uint8Array(n); crypto.getRandomValues(ent);
+      S.wseed=fxEntropyToMnemonic(ent); S.waddr=null; S.wqr=null; S._navIdx=0; draw(); return; }
+    if(act==="derive"){ this._derive(); return; }
+    if(act==="qr_btc"){ S.wqr=(S.wqr==="btc")?null:"btc"; draw(); return; }
+    if(act==="qr_eth"){ S.wqr=(S.wqr==="eth")?null:"eth"; draw(); return; }
+    if(act==="cp_btc"){ try{navigator.clipboard&&navigator.clipboard.writeText(S.waddr.btc);}catch(e){} return; }
+    if(act==="cp_eth"){ try{navigator.clipboard&&navigator.clipboard.writeText(S.waddr.eth);}catch(e){} return; }
+  },
+  _derive:function(){
+    if(!S.wseed){ return; } S.wderiving=true; S.wderr=null; draw();
+    fxLoadLibs(function(err){
+      if(err){ S.wderiving=false; S.wderr="crypto library failed to load"; draw(); return; }
+      try{
+        var mn=S.wseed.join(" "), E=window.ethers;
+        var eth=E.HDNodeWallet.fromPhrase(mn);                         // m/44'/60'/0'/0/0 (EIP-55)
+        var bn=E.HDNodeWallet.fromPhrase(mn,"","m/44'/0'/0'/0/0");     // BTC BIP44 legacy
+        var pub=bn.publicKey;
+        var h160=E.ripemd160(E.sha256(pub));
+        var payload=E.concat(["0x00",h160]);
+        var chk=E.dataSlice(E.sha256(E.sha256(payload)),0,4);
+        var btc=E.encodeBase58(E.concat([payload,chk]));
+        S.waddr={ eth:eth.address, btc:btc };
+      }catch(e){ S.wderr="derive error: "+(e&&e.message||e); }
+      S.wderiving=false; draw();
+    });
   }
 };
 
@@ -1258,7 +1314,7 @@ V.settings={
 function head(t,ic,tag){return '<div class="vhead"><span class="ico">'+ic+'</span><div>'+
   '<div class="tag">'+tag+'</div><h1>'+t+'</h1></div></div>';}
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
-var BUILD="2026.11.17·b19", BOOTED=Date.now();
+var BUILD="2026.11.17·b20", BOOTED=Date.now();
 S.pylog=[{t:"FLIPPER X python console — fx.* API ready",c:"sys"}];
 
 function pyEval(src){
@@ -1412,7 +1468,7 @@ function updateIdle(){ var d=new Date();
   var np=document.getElementById("idle-np"),tr=(S.playing!=null)?S.playlist[S.playing]:null;
   np.textContent=(tr&&!FXAUD.paused)?("♪ "+(tr.title||"")):"";
 }
-function showIdle(){ try{window.__fxStopMedia&&window.__fxStopMedia();}catch(e){} S.locked=true; S.pinBuf=""; S.wseed=null; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
+function showIdle(){ try{window.__fxStopMedia&&window.__fxStopMedia();}catch(e){} S.locked=true; S.pinBuf=""; S.wseed=null; S.waddr=null; S.wqr=null; updateIdle(); elLock.classList.add("hidden"); elIdle.classList.remove("hidden"); chrome(false); fxWake(); }
 window.FXIDLE=function(){ try{ if(elBoot.classList.contains("hidden")) showIdle(); }catch(e){} };
 elLock.addEventListener("click",function(){document.getElementById("device").focus();});
 // on-screen digit entry for lock (click dots area cycles? no) — allow clicking anywhere + keyboard
