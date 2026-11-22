@@ -6,3 +6,6 @@ local.properties
 .idea/
 .DS_Store
 captures/
+# signing keys never go in the repo
+*.jks
+*.keystore

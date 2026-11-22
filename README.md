@@ -15,9 +15,14 @@ no `INTERNET` permission.
 Pushing to `main` runs `.github/workflows/build.yml`, which:
 1. installs JDK 17 + the Android SDK + Gradle 8.7 on the runner,
 2. runs `gradle assembleDebug`,
-3. uploads **`FlipperX-launcher-apk`** (contains `app-debug.apk`) as a build artifact.
+3. signs the APK with the private key stored in the repo secrets `FX_KEYSTORE_B64` and
+   `FX_KEYSTORE_PASSWORD` (the key itself is never committed),
+4. publishes `app-debug.apk` as a GitHub Release (`build-N`).
 
-Download the artifact from the Actions run, unzip → `app-debug.apk`.
+Download `app-debug.apk` from the latest Release.
+
+To build in your own fork, generate a keystore (`keytool -genkeypair -keystore fx.jks -alias fxkey ...`)
+and add those two secrets (`base64 -w0 fx.jks` for the first).
 
 ### Or build locally (if you install Android Studio)
 Open this folder in Android Studio and **Build → Build APK**, or from a terminal with the

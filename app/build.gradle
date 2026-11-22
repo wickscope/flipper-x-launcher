@@ -14,15 +14,18 @@ android {
         versionName "1.0"
     }
 
+    // Release signing key is NOT in the repo. CI decodes it from the FX_KEYSTORE_B64
+    // secret; locally, point FX_KEYSTORE at your .jks. Without it, builds fall back to
+    // the standard Android debug key. v1 + v2 both on: some locked carrier installers want v1.
+    def fxKeystore = System.getenv('FX_KEYSTORE')
     signingConfigs {
-        debug {
-            // Fixed key committed to the repo so every CI build signs identically —
-            // lets updates install in place instead of forcing an uninstall.
-            // Both schemes on: some locked carrier installers want v1 (JAR) too.
-            storeFile file('fx.keystore')
-            storePassword 'flipperx'
-            keyAlias 'fxkey'
-            keyPassword 'flipperx'
+        fx {
+            if (fxKeystore) {
+                storeFile file(fxKeystore)
+                storePassword System.getenv('FX_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('FX_KEY_ALIAS') ?: 'fxkey'
+                keyPassword System.getenv('FX_KEY_PASSWORD') ?: System.getenv('FX_KEYSTORE_PASSWORD')
+            }
             enableV1Signing true
             enableV2Signing true
         }
@@ -30,11 +33,11 @@ android {
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            if (fxKeystore) signingConfig signingConfigs.fx
         }
         release {
             minifyEnabled false
-            signingConfig signingConfigs.debug   // same fixed key
+            if (fxKeystore) signingConfig signingConfigs.fx
         }
     }
 

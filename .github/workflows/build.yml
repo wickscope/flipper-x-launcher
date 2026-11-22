@@ -29,7 +29,17 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Decode signing key
+        env:
+          FX_KEYSTORE_B64: ${{ secrets.FX_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$FX_KEYSTORE_B64" ]; then echo "::error::FX_KEYSTORE_B64 secret is not set"; exit 1; fi
+          echo "$FX_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/fx-release.jks"
+
       - name: Build debug APK
+        env:
+          FX_KEYSTORE: ${{ runner.temp }}/fx-release.jks
+          FX_KEYSTORE_PASSWORD: ${{ secrets.FX_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Publish APK as a Release
